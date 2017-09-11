@@ -68,19 +68,18 @@ int fdb_test(int argc, char** argv)
 
 	if (fdb.loadFromStream(file) != 0) return 2;
 
-	std::string table_name = "BehaviorParameter";
+	std::string table_name = "Objects";
 	fdb_table_t table = fdb.findTableByName(table_name);
 	int32_t index = std::atoi(argv[2]);
-	
-	std::vector<BehaviorParameter> list = makeTypeQuery<BehaviorParameter, int32_t>(table, file, index);
+
+	std::vector<Objects> list = makeTypeQuery<Objects, int32_t>(table, file, index);
 
 	file.close();
 
-	for (BehaviorParameter param : list)
+	for (Objects obj : list)
 	{
-		std::cout << std::setw(5) << param.m_behaviorID << " ";
-		std::cout << std::setw(20) << param.m_parameterID << " ";
-		std::cout << param.m_value << std::endl;
+		std::cout << std::setw(5) << obj.m_id << " ";
+		std::cout << obj.m_name << std::endl;
 	}
 
 	return 0;
