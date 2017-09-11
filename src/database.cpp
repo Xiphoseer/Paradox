@@ -301,6 +301,23 @@ FDBStatement::FDBStatement(fdb_table_t& table, std::istream& file, int32_t index
 	read(this->file, this->row_info_addr);
 }
 
+void FDBStatement::execute(FDBQuery& query)
+{
+	bool found;
+	while (this->seek_next_row_data())
+	{	
+		if (query.where(file))
+		{
+			found = true;
+			query.select(file);
+		}
+		else if (found)
+		{
+			break;
+		}
+	}
+}
+
 bool FDBStatement::seek_next_row_data()
 {
 	while (this->row_info_addr != -1)
@@ -322,4 +339,9 @@ bool FDBStatement::seek_next_row_data()
 		return true;
 	}
 	return false;
+}
+
+int32_t hash(int32_t in, int32_t mod)
+{
+	return in % mod;
 }

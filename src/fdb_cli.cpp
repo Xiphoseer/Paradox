@@ -71,43 +71,8 @@ int fdb_test(int argc, char** argv)
 	std::string table_name = "BehaviorParameter";
 	fdb_table_t table = fdb.findTableByName(table_name);
 	int32_t index = std::atoi(argv[2]);
-
-	// -----------------
-	FDBStatement stmt(table, file, index);
-	std::vector<BehaviorParameter> list;
-
-	FDBQuery query =
-	{
-		[index](std::istream& file)
-		{
-			int32_t pk;
-			readField(file, pk);
-			file.seekg(-8, file.cur);
-			return pk == index;
-		},
-		[&list](std::istream& file)
-		{
-			BehaviorParameter param;
-			readDB(param, file);
-			list.push_back(param);
-		}
-	};
-
-	bool found;
-	while (stmt.seek_next_row_data())
-	{	
-		if (query.where(file))
-		{
-			found = true;
-			query.select(file);
-		}
-		else if (found)
-		{
-			break;
-		}
-	}
-	// -----------------
-
+	
+	std::vector<BehaviorParameter> list = makeTypeQuery<BehaviorParameter, int32_t>(table, file, index);
 
 	file.close();
 

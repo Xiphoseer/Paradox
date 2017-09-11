@@ -62,6 +62,12 @@ struct FileDataBase
 	fdb_table_t findTableByName(std::string name);
 };
 
+struct FDBQuery
+{
+	std::function<bool(std::istream&)> where;
+	std::function<void(std::istream&)> select;
+};
+
 struct FDBStatement
 {
 	fdb_table_t& table;
@@ -69,13 +75,49 @@ struct FDBStatement
 	int32_t row_info_addr;
 
 	FDBStatement(fdb_table_t& table, std::istream& file, int32_t index);
+	void execute(FDBQuery& query);
 	bool seek_next_row_data();
 };
 
-struct FDBQuery
+std::string fdbReadString(std::istream& stream, int32_t data);
+
+template<typename T>
+struct TypeSelector
 {
-	std::function<bool(std::istream&)> where;
-	std::function<void(std::istream&)> select;
+	std::vector<T>& list;
+
+	TypeSelector(std::vector<T>& list) : list(list) {};
+	void operator()(std::istream& file)
+	{
+		T entry;
+		readDB(entry, file);
+		list.push_back(entry);
+	}
 };
 
-std::string fdbReadString(std::istream& stream, int32_t data);
+template<typename T>
+struct PrimaryKeyPredicate
+{
+	T ref;
+
+	PrimaryKeyPredicate(T ref) : ref(ref) {};
+	bool operator()(std::istream& file)
+	{
+		T val;
+		readField(file, val);
+		file.seekg(-8, file.cur);
+		return val == ref;
+	}
+};
+
+int32_t hash(int32_t in, int32_t mod);
+
+template<typename E, typename K>
+std::vector<E> makeTypeQuery(fdb_table_t table, std::istream& file, K primary_key)
+{
+	std::vector<E> list;
+	FDBQuery query = {PrimaryKeyPredicate<K>(primary_key), TypeSelector<E>(list)};
+	FDBStatement stmt(table, file, hash(primary_key, table.row_count));
+	stmt.execute(query);
+	return list;
+}
