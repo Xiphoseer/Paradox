@@ -42,6 +42,7 @@ Makefile
 /config.status
 /config.h
 .deps
+/build
 
 ### C ###
 # Prerequisites
