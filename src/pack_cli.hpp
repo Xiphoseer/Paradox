@@ -18,3 +18,5 @@ int pack_all(int argc, char** argv);
 int pack_missing(int argc, char** argv);
 int pack_target(int argc, char** argv);
 int pack_full_extract(int argc, char** argv);
+
+int main_catalog(int argc, char** argv);

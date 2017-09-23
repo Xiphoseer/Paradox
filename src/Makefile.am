@@ -1,6 +1,6 @@
 bin_PROGRAMS = paradox
-paradox_SOURCES = catalog.cpp cdclient.cpp cli.cpp database.cpp fdb_cli.cpp filesystem.cpp main.cpp manifest.cpp md5.c pack.cpp pack_cli.cpp package.cpp pipeline.cpp transform.cpp trim.cpp
+paradox_SOURCES = cdclient.cpp cli.cpp fdb_cli.cpp main.cpp md5.c pack.cpp pack_cli.cpp pipe_cli.cpp pipeline.cpp transform.cpp
 
-paradox_CXXFLAGS = -std=c++14 $(MAGICKXX_CFLAGS)
-paradox_LDADD       = $(MAGICKXX_LIBS) -lz -lm -lstdc++
+paradox_CXXFLAGS = $(MAGICKXX_CFLAGS) -std=c++14
+paradox_LDADD    = $(MAGICKXX_LIBS) -lz -lm -lstdc++ -lassembly
 

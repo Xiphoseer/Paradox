@@ -8,9 +8,10 @@
 #include <cstring>
 #include <algorithm>
 
-#include "manifest.hpp"
-#include "catalog.hpp"
-#include "filesystem.hpp"
+#include <assembly/catalog.hpp>
+#include <assembly/manifest.hpp>
+#include <assembly/filesystem.hpp>
+
 #include "sd0_stream.hpp"
 #include "md5.h"
 
@@ -203,7 +204,7 @@ void ClientExtractorStage::run(std::istream* source, std::ostream* sink) {
 		else
 		{
 			std::ofstream outfile(entry.path);
-			ensure_dir_exists(entry.path);
+			fs::ensure_dir_exists(entry.path);
 
 			sd0_istreambuf<1024> inflate_buf(&infile);
 			std::istream inflated(&inflate_buf);
@@ -214,5 +215,4 @@ void ClientExtractorStage::run(std::istream* source, std::ostream* sink) {
 			outfile.close();
 		}
  	}
-
 }

@@ -17,7 +17,8 @@ std::istream* InitialInputStage::getStream(std::istream* source) {
 	return source;
 }
 
-DumpInputStage::DumpInputStage(InputStage* wrapped, std::string filename) : filename(filename) {
+DumpInputStage::DumpInputStage(InputStage* wrapped, std::string filename) : filename(filename)
+{
 	this->wrapped = wrapped;
 }
 
@@ -86,7 +87,8 @@ void GenericOutputStage::cleanup() {
 
 TransformManageStage::TransformManageStage(TransformStage* transform) : transform(transform) {}
 
-void TransformManageStage::run(InputStage* input, OutputStage* output, std::vector<std::string> files) {
+void TransformManageStage::run(InputStage* input, OutputStage* output, std::vector<std::string> files)
+{
 	bool from_stdin = files.empty();
 	bool first = true;
 

@@ -5,8 +5,8 @@
 #include <iostream>
 #include <cstring>
 
-#include "catalog.hpp"
-#include "package.hpp"
+#include <assembly/catalog.hpp>
+#include <assembly/package.hpp>
 
 #define CRC_POLY 0x04C11DB7
 #define CRC_INIT 0xFFFFFFFF

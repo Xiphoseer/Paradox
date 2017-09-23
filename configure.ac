@@ -1,6 +1,6 @@
 AC_INIT([paradox], [0.1], [xiphoseer@xiphos.ia])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
-AM_SILENT_RULES
+AM_SILENT_RULES([yes])
 AC_PROG_CXX
 AC_PROG_CC
 

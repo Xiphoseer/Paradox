@@ -8,15 +8,17 @@
 #include <cmath>
 #include <unistd.h>
 
+#include <assembly/catalog.hpp>
+#include <assembly/package.hpp>
+#include <assembly/manifest.hpp>
+#include <assembly/filesystem.hpp>
+
 #include "cli.hpp"
 #include "pack.hpp"
-#include "package.hpp"
-#include "manifest.hpp"
-#include "catalog.hpp"
-#include "filesystem.hpp"
+
 #include "sd0_stream.hpp"
 
-opt_t pack_options[] = 
+cli::opt_t pack_options[] = 
 {
 	{ "crc",			&pack_crc, 			"Compute CRC-23 has for a filename"					},
 	{ "pack-index",		&pack_pack_index,	"Get the pack file assiciated with a CRC"			},
@@ -77,7 +79,7 @@ int main_pack (int argc, char** argv)
 		pack::ReadPackCatalog(catalog);
 	}
 
-	return call("PackCLI", pack_options, argv[optind], argc - optind, argv + optind);
+	return cli::call("PackCLI", pack_options, argv[optind], argc - optind, argv + optind);
 }
 
 int test_pack (int argc, char** argv)
@@ -87,22 +89,7 @@ int test_pack (int argc, char** argv)
 
 int help_pack (int argc, char** argv)
 {
-	std::cout << std::string(25, '=') << " PackCLI Tool " << std::string(25, '=') << std::endl;
-	std::cout << "Pack.dll command line" << std::endl;
-	std::cout << std::endl << std::left;
-
-	for (opt_t* o = pack_options; o->text != 0; o++)
-	{
-		if (o->help != 0)
-		{
-			std::cout << "  " << std::setw(15) << o->text << ": " << o->help << std::endl;
-		}
-	}
-
-	std::cout << std::right << std::endl;
-	std::cout << std::string(64, '=') << std::endl;
-
-	return 0;
+	cli::help("PackCLI", pack_options, "Pack.dll command line");
 }
 
 int console_pack (int argc, char** argv)
@@ -437,7 +424,7 @@ int pack_missing(int argc, char** argv)
 			uint32_t crc = pack::GetCRCForFilename(filename.c_str());
 
 			int index = find_crc_index(catalog, crc);
-			if (index == -1 && !exists("./" + filename))
+			if (index == -1 && !fs::exists("./" + filename))
 			{
 				std::cout << std::setw(10) << crc << ": " << filename << std::endl;
 			}
@@ -578,7 +565,7 @@ int pack_full_extract(int argc, char** argv)
 
 			std::replace(path.begin(), path.end(), '\\', '/');
 			std::string out = out_dir + path;
-			ensure_dir_exists(out);
+			fs::ensure_dir_exists(out);
 
 			std::ofstream ofile(out);
 
@@ -616,4 +603,31 @@ int pack_full_extract(int argc, char** argv)
 
 	std::cerr << "Usage: pack full-extract <manifest> <catalog> [<base-dir>]" << std::endl;
 	return 1;
+}
+
+int main_catalog (int argc, char** argv)
+{
+	if (argc > 2)
+	{
+		CatalogFile catalog;
+		catalog.loadFromFile(argv[1]);
+		CatalogPointer ptr = findByCRC(&catalog, pack::GetCRCForFilename(argv[2]));
+		if (ptr.valid())
+		{
+			std::cout << std::setw(20) << "Filename: " << argv[2] << std::endl;
+			std::cout << std::setw(20) << "CRC: " << ptr.crc() << std::endl;
+			std::cout << std::setw(20) << "Pack File: " << ptr.pack() << std::endl;
+			std::cout << std::setw(20) << "Data: " << ptr.data() << std::endl;
+		}
+		else
+		{
+			std::cerr << "Could not find info for '" << argv[2] << "'" << std::endl;
+		}
+		return 0;
+	}
+	else
+	{
+		std::cout << "Usage: catalog <catalog> <path>" << std::endl;
+		return 1;
+	}
 }
