@@ -12,13 +12,13 @@
 #include <assembly/package.hpp>
 #include <assembly/manifest.hpp>
 #include <assembly/filesystem.hpp>
+#include <assembly/cli.hpp>
 
-#include "cli.hpp"
 #include "pack.hpp"
 
 #include "sd0_stream.hpp"
 
-cli::opt_t pack_options[] = 
+cli::opt_t pack_options[] =
 {
 	{ "crc",			&pack_crc, 			"Compute CRC-23 has for a filename"					},
 	{ "pack-index",		&pack_pack_index,	"Get the pack file assiciated with a CRC"			},
@@ -56,7 +56,7 @@ int main_pack (int argc, char** argv)
 			break;
 		}
 	}
-	
+
 	if (argc <= optind) {
 		std::cout << "Usage: pack [-c <catalog>] <subcommand> ..." << std::endl;
 		return 1;
@@ -109,7 +109,7 @@ int console_pack (int argc, char** argv)
 
 		char buffer[command.size() + 1];
 		strcpy(buffer, command.c_str());
-		
+
 		char* _argv[_argc];
 		//_argv[0] = (char*) CLI_PATH;
 		_argv[0] = (char*) buffer;
@@ -134,7 +134,7 @@ int pack_crc(int argc, char** argv)
 		std::cout << std::hex << crc << std::dec << " (" << crc << ")" << std::endl;
 		return 0;
 	}
-	else 
+	else
 	{
 		std::cout << "Usage: pack crc <filename>" << std::endl;
 		return 1;
@@ -150,7 +150,7 @@ int pack_pack_index(int argc, char** argv)
 		std::cout << "Pack Index: " << packId << std::endl;
 		return 0;
 	}
-	else 
+	else
 	{
 		std::cerr << "Usage: pack pack-index <filename-crc>" << std::endl;
 		return 1;
@@ -190,7 +190,7 @@ int pack_move_to (int argc, char** argv)
 {
 	if (argc > 2)
 	{
-		return pack::MoveFileToPack(argv[1], argv[2], 0, 0, 0, 0, 0);	
+		return pack::MoveFileToPack(argv[1], argv[2], 0, 0, 0, 0, 0);
 	}
 	std::cout << "Usage: pack move-to <file> <manifestname>" << std::endl;
 }
@@ -209,7 +209,7 @@ int pack_name (int argc, char** argv)
 			std::cerr << "'" << argv[1] << "' is not an integer" << std::endl;
 			return 2;
 		}
-		
+
 		char buffer[256];
 		if (pack::GetPackName(index, buffer, 256) == 0)
 		{
@@ -245,8 +245,8 @@ int pack_read_catalog(int argc, char** argv)
 	if (argc > optind)
 	{
 		int32_t count = pack::ReadPackCatalog(argv[optind]);
-		std::cout << "# Files: " << count << std::endl; 
-		
+		std::cout << "# Files: " << count << std::endl;
+
 		if (list)
 		{
 			char buffer[256];
@@ -254,14 +254,14 @@ int pack_read_catalog(int argc, char** argv)
 			{
 				pack::GetPackName(i, buffer, 256);
 				std::cout << std::setw(log10(count) + 1) << i << ": " << buffer << std::endl;
-			}		
+			}
 		}
 	}
 	else
 	{
 		std::cerr << "Usage: pack read-catalog [-l] <path>" << std::endl;
 	}
-	
+
 }
 
 typedef struct Map
@@ -356,7 +356,7 @@ int32_t find_crc_index(CatalogFile& file, uint32_t crc)
 {
 	int size = file.files.size();
 	int index =  (size > 0) ? size / 2 : -1;
-	
+
 	while (index != -1 && file.files.at(index).crc != crc)
 	{
 		index = file.files.at(index).crc > crc ? file.files.at(index).left : file.files.at(index).right;
@@ -378,7 +378,7 @@ int pack_all(int argc, char** argv)
 		std::vector<std::string> names;
 		int count = catalog.files.size();
 		names.reserve(count);
-		
+
 		for (int i = 0; i < count; i++){
 			names.push_back("???");
 		}
@@ -557,7 +557,7 @@ int pack_full_extract(int argc, char** argv)
 
 			CatalogPointer ptr = findByCRC(&catalog, crc);
 			if (!ptr.valid()) continue;
-			
+
 			int id = ptr.packId();
 
 			PackagePointer itr = findByCRC(&(packFiles.at(id)), crc);

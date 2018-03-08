@@ -12,23 +12,21 @@
 
 #include <assembly/filesystem.hpp>
 #include <assembly/database.hpp>
-#include <assembly/components.hpp>
+#include <assembly/fdb_reader.hpp>
 #include <assembly/stringutil.hpp>
+#include <assembly/cli.hpp>
+#include <assembly/functional.hpp>
 
-#include "cli.hpp"
-
-#include "cdclient.hpp"
-
-cli::opt_t fdb_options[] = 
+cli::opt_t fdb_options[] =
 {
-	{ "test",			&fdb_test, 			"Test something" },
-	{ "convert",		&fdb_convert,	 	"Convert an image to another format" },
-	{ "header",			&fdb_header,	 	"Generate c++ files for a FDB" },
-	{ "docs-table",		&fdb_docs_table,	"Generate a single reST page for a FDB table" },
-	{ "docs-tables",	&fdb_docs_tables,	"Generate a folder of reST pages for a FDB table" },
-	{ "all-tables",		&fdb_all_tables,	"Generate a reST list of all tables" },
-	{ "help",			&help_fdb,			"Show this help" },
-	{ 0, 0, 0 }
+    { "read",           &fdb_read,          "Reads a fdb file" },
+    { "convert",        &fdb_convert,       "Convert an image to another format" },
+    { "header",         &fdb_header,        "Generate c++ files for a FDB" },
+    { "docs-table",     &fdb_docs_table,    "Generate a single reST page for a FDB table" },
+    { "docs-tables",    &fdb_docs_tables,   "Generate a folder of reST pages for a FDB table" },
+    { "all-tables",     &fdb_all_tables,    "Generate a reST list of all tables" },
+    { "help",           &help_fdb,          "Show this help" },
+    { 0, 0, 0 }
 };
 
 const int lens[] = {4,15,4,15,50,3,20,4,30};
@@ -51,86 +49,139 @@ int help_fdb (int argc, char** argv)
 	cli::help("DatabaseCLI", fdb_options, "FileDataBase manipulation tool");
 }
 
-void print_state (const std::ios& stream) {
-  std::cout << " good()=" << stream.good();
-  std::cout << " eof()=" << stream.eof();
-  std::cout << " fail()=" << stream.fail();
-  std::cout << " bad()=" << stream.bad();
-  std::cout << std::endl;
+void print_state (const std::ios& stream)
+{
+    std::cout << " good()=" << stream.good();
+    std::cout << " eof()=" << stream.eof();
+    std::cout << " fail()=" << stream.fail();
+    std::cout << " bad()=" << stream.bad();
+    std::cout << std::endl;
 }
 
 void print(int i)
 {
-	std::cout << i << std::endl;
+    std::cout << i << std::endl;
 }
 
-int fdb_test(int argc, char** argv)
+std::ostream& operator<<(std::ostream& ostr, const FDB::Field& f)
 {
-	if (argc <= 2)
-	{
-		std::cout << "Usage: fdb test <database> <pk>" << std::endl;
-		return 1;
-	}
+    switch(f.type)
+    {
+        case FDB::ValType::BOOLEAN:
+        case FDB::ValType::INTEGER:  ostr << f.int_val; break;
+        case FDB::ValType::FLOAT:    ostr << f.flt_val; break;
+        case FDB::ValType::BIGINT:   ostr << f.i64_val; break;
+        case FDB::ValType::VARCHAR:
+        case FDB::ValType::TEXT: ostr << f.str_val; break;
+    }
+    return ostr;
+}
 
-	FileDataBase fdb;
-	std::ifstream file(argv[1]);
+std::string to_json(const FDB::Field& f)
+{
+    switch(f.type)
+    {
+        case FDB::ValType::BOOLEAN: return f.int_val == 0 ? "false" : "true";
+        case FDB::ValType::INTEGER: return std::to_string(f.int_val);
+        case FDB::ValType::FLOAT:   return std::to_string(f.flt_val);
+        case FDB::ValType::BIGINT:  return std::to_string(f.i64_val);
+        case FDB::ValType::VARCHAR:
+        case FDB::ValType::TEXT: return '\"' + f.str_val + '\"';
+    }
+    return "null";
+}
 
-	if (fdb.loadFromStream(file) != 0) return 2;
+int fdb_read(int argc, char** argv)
+{
+    if (argc <= 1)
+    {
+        std::cout << "Usage: fdb read <file>" << std::endl;
+        return 1;
+    }
 
-	std::string obj_table_name = "Objects";
-	fdb_table_t obj_table = fdb.findTableByName(obj_table_name);
+    FDB::Schema schema;
+    FDB::readFromFile(argv[1], schema);
 
-	std::string reg_table_name = "ComponentsRegistry";
-	fdb_table_t reg_table = fdb.findTableByName(reg_table_name);
+    //std::cout << "Pre Table" << std::endl;
+    FDB::Table& tbl = schema.table("ZoneTable");
+    //std::cout << "Pre Slot" << std::endl;
+    //FDB::Slot& slot = tbl.slot(1200);
+    //std::cout << "Pre Func" << std::endl;
+    //std::function<bool(const FDB::Row&)> funcA = [](const FDB::Row& row){ return row.fields.at(0).int_val > 1000; };
+    //std::function<bool(const FDB::Row&)> funcB = [](const FDB::Row& row){ return row.fields.at(0).int_val < 2300; };
+    //std::function<bool(const FDB::Row&)> func = logic::land(funcA, funcB);
+    //std::cout << "Pre Row" << std::endl;
+    //std::vector<FDB::Row> res = slot.query(func);
+    //std::cout << "Pre Loop" << std::endl;
 
-	std::string rnd_table_name = "RenderComponent";
-	fdb_table_t rnd_table = fdb.findTableByName(rnd_table_name);
+    std::string tables_path = "tables";
+    std::string zone_table_path = tables_path + "/ZoneTable";
+    std::string zone_index_path = zone_table_path + "/index.json";
 
-	int32_t index = std::atoi(argv[2]);
+    std::string index_path = "lu-json/" + zone_index_path;
+    fs::ensure_dir_exists(index_path);
+    std::ofstream zone_index(index_path);
 
-	std::vector<Objects> obj_list = makeTypeQuery<Objects, int32_t>(obj_table, file, index);
-	std::vector<ComponentsRegistry> comp_list = makeTypeQuery<ComponentsRegistry, int32_t>(reg_table, file, index);
+    bool started = false;
+    zone_index << "{" << std::endl;
+    zone_index << "  \"_links\": {" << std::endl;
+    zone_index << "    \"self\": { \"href\": \"/" <<  index_path << "\" }" << std::endl;
+    zone_index << "  }," << std::endl;
+    zone_index << "  \"_embedded\": {" << std::endl;
+    zone_index << "    \"ZoneTable\": [";
+    for (const FDB::Slot& s : tbl.slots)
+    {
+        for (const FDB::Row& r : s.rows)
+        {
+            const FDB::Field& file = r.fields.at(2);
+            const FDB::Field& display = r.fields.at(8);
 
-	std::cout << "General" << std::endl;
-	std::cout << "=======" << std::endl;
-	for (Objects obj : obj_list)
-	{
-		std::cout << std::setw(15) << "Name: " << obj.m_name << std::endl;
-		std::cout << std::setw(15) << "Type: " << obj.m_type << std::endl;
-		std::cout << std::setw(15) << "Description: " << obj.m_description << std::endl;
-		std::cout << std::setw(15) << "DisplayName: " << obj.m_displayName << std::endl;
-	}
-	std::cout << std::endl;
+            if (!ends_with(file.str_val, "__removed") && display.type != FDB::ValType::NOTHING)
+            {
+                const FDB::Field& zone_id = r.fields.at(0);
 
-	std::cout << "Components" << std::endl;
-	std::cout << "==========" << std::endl;
-	for (ComponentsRegistry comp : comp_list)
-	{
-		switch(comp.m_component_type)
-		{
-			case COMPONENT_RENDER:
-			{
-				std::cout << "RenderComponent #" << comp.m_component_id << std::endl;
-				std::vector<RenderComponent> rnd_list = makeTypeQuery<RenderComponent, int32_t>(rnd_table, file, comp.m_component_id);
 
-				for (RenderComponent rnd : rnd_list)
-				{
-					std::cout << "RenderAsset: " << rnd.m_render_asset << std::endl;
-					std::cout << "IconAsset: " << rnd.m_icon_asset << std::endl;
-					std::cout << "IconID: " << rnd.m_IconID << std::endl;
-				}
-				break;
-			} 
-			default:
-				std::cout << std::setw(5);
-				std::cout << comp.m_component_type << " ";
-				std::cout << comp.m_component_id << std::endl;		
-		}
-	}
+                std::string zone_path = zone_table_path + "/" + std::to_string(zone_id.int_val) + ".json";
+                std::string zone_path_str = "lu-json/" + zone_path;
 
-	file.close();
+                fs::ensure_dir_exists(zone_path_str);
+                std::ofstream zone(zone_path_str);
 
-	return 0;
+                zone << "{" << std::endl;
+                zone << "  \"_links\": {" << std::endl;
+                zone << "    \"self\": { \"href\": \"/" << zone_path_str << "\" }" << std::endl;
+                zone << "  }";
+
+                for (int i = 0; i < tbl.columns.size(); i++)
+                {
+                    zone << "," << std::endl;
+                    zone << "  \"" << tbl.columns.at(i).name << "\": ";
+                    zone << to_json(r.fields.at(i)) << std::endl;
+                }
+
+                zone << std::endl << "}" << std::endl;
+                zone.close();
+
+                if (started) { zone_index << ", "; }
+                zone_index << "{" << std::endl;
+                zone_index << "        \"_links\": {" << std::endl;
+                zone_index << "          \"self\": { \"href\": \"/" <<  zone_path_str << "\" }," << std::endl;
+                zone_index << "          \"level\": { \"href\": \"/lu-json/zones/" << zone_id << ".json\" }" << std::endl;
+                zone_index << "        }," << std::endl;
+                zone_index << "        \"id\": " << zone_id << "," << std::endl;
+                zone_index << "        \"file\": \"" << file << "\"," << std::endl;
+                zone_index << "        \"display\": \"" << display << "\"" << std::endl;
+                zone_index << "      }";
+                started = true;
+            }
+        }
+    }
+    zone_index << "]" << std::endl;
+    zone_index << "  }" << std::endl;
+    zone_index << "}" << std::endl;
+
+    zone_index.close();
+    return 0;
 }
 
 int fdb_convert(int argc, char** argv)
@@ -235,7 +286,7 @@ int fdb_header(int argc, char** argv)
 	for (int i = 0; i < fdb.tables.size(); i++)
 	{
 		fdb_table_t& table = fdb.tables.at(i);
-		
+
 		ofile << "// SlotCount: " << table.row_count << std::endl;
 		ofile << "typedef struct" << std::endl;
 		ofile << "{" << std::endl;
@@ -270,7 +321,7 @@ int max(int a, int b)
 }
 
 void read_row(std::istream& file, std::ostream& ofile, int32_t row_data_addr, int* args, int* widths, int count)
-{	
+{
 	file.seekg(row_data_addr);
 
 	for (int k = 0; k < count; k++)
@@ -280,7 +331,7 @@ void read_row(std::istream& file, std::ostream& ofile, int32_t row_data_addr, in
 		read(file, data_type);
 
 		int len = widths[k];
-		
+
 		const char* before = (k > 0) ? ", " : "";
 		ofile << "\t" << ((k > 0) ? "  - " : "* - ");
 
@@ -296,7 +347,7 @@ void read_row(std::istream& file, std::ostream& ofile, int32_t row_data_addr, in
 				float float_val;
 				read(file, float_val);
 				ofile /*<< before << std::setw(len)*/ << float_val;
-				break;	
+				break;
 			case 4: // TEXT
 			case 8: // VARCHAR
 			{
@@ -345,7 +396,7 @@ int read_row_infos(std::istream& file, std::ostream& ofile, int32_t row_info_add
 		file.seekg(row_data_header_addr);
 		read(file, column_count);
 		read(file, row_data_addr);
-		
+
 		if (row_data_addr == -1) continue;
 
 		/*std::cout << std::setw(6) << r << " ";*/
@@ -420,10 +471,10 @@ int fdb_docs_table(int argc, char** argv)
 	{
 		file.seekg(cur);
 		int32_t row_info_addr;
-		
+
 		read(file, row_info_addr);
 		cur = file.tellg();
-		
+
 		read_row_infos(file, ofile, row_info_addr, args, widths, i);
 	}
 
@@ -513,10 +564,10 @@ int fdb_docs_tables(int argc, char** argv)
 	{
 		file.seekg(cur);
 		int32_t row_info_addr, row_data_header_addr, column_count, row_data_addr;
-		
+
 		read(file, row_info_addr);
 		cur = file.tellg();
-		
+
 		bool started = (row_info_addr != -1);
 		if (started)
 		{
@@ -547,14 +598,14 @@ int fdb_docs_tables(int argc, char** argv)
 				ofile << std::string(title_str.size(), '=') << std::endl;
 				ofile << std::endl;
 			}
-			
+
 			if (subheader)
 			{
 				ofile << table.name << " #" << r << std::endl;
 				ofile << std::string(table.name.size() + log10(r) + 3, '-') << std::endl;
-				ofile << std::endl;	
+				ofile << std::endl;
 			}
-			
+
 			if (subheader || newfile)
 			{
 				ofile << ".. list-table ::" << std::endl;
@@ -563,9 +614,9 @@ int fdb_docs_tables(int argc, char** argv)
 				ofile << std::endl;
 				ofile << header.str();
 			}
-			
+
 			read_row_infos(file, ofile, row_info_addr, args, widths, i);
-			
+
 			if (subheader) ofile << std::endl;
 		}
 	}

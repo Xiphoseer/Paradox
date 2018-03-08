@@ -25,19 +25,20 @@ int main_pipe(int argc, char** argv) {
 
 	std::stringstream pipe;
 	while (true) {
-		static struct option long_options[] = {
-			{"verbose",	no_argument,	&verbose_flag, 'v'},
-			{"brief",	no_argument,	&verbose_flag, 0},
-			{"inflate", no_argument,				0, 'i'},
-			{"sd0",     no_argument, 				0, 's'},
+		static struct option long_options[] =
+        {
+			{"verbose",	 no_argument,	&verbose_flag, 'v'},
+			{"brief",    no_argument,	&verbose_flag, 0},
+			{"inflate",  no_argument,				0, 'i'},
+			{"sd0",      no_argument, 				0, 's'},
 			{"sd0c",     no_argument, 				0, 'S'},
-			{"file",    required_argument,			0, 'f'},
-			{"config", 	no_argument,				0, 'c'},
-			{"pki", 	no_argument,				0, 'p'},
-			{"manifest",optional_argument,			0, 'm'},
-			{"md5",		no_argument,				0, '5'},
-			{"checksd0",no_argument,				0, '0'},
-			{"client",	required_argument,			0, 'l'},
+			{"file",     required_argument,			0, 'f'},
+			{"config", 	 no_argument,				0, 'c'},
+			{"pki",      no_argument,				0, 'p'},
+			{"manifest", optional_argument,			0, 'm'},
+			{"md5",      no_argument,				0, '5'},
+			{"checksd0", no_argument,				0, '0'},
+			{"client",   required_argument,			0, 'l'},
 			{0, 0, 0, 0}
 		};
 
@@ -59,7 +60,7 @@ int main_pipe(int argc, char** argv) {
 	        case 'i':
 				if (part == 0) {
 					pipe << "Inflate >> ";
-					ipipe = new GenericInputStage(ipipe, &create_inflate_stream<1024>);	
+					ipipe = new GenericInputStage(ipipe, &create_inflate_stream<1024>);
 				} else {
 					std::cerr << "Cannot add inflate stage to output!" << std::endl;
 					exit(2);

@@ -1,7 +1,8 @@
 #pragma once
 #include <stdint.h>
 
-namespace pack {
+namespace pack
+{
 	int32_t SetInstallDir(char* strDirectory);
 	uint32_t GetCRCForFilename(const char* strFilename);
 	int32_t GetPackIndex(uint32_t filenameCRC);
