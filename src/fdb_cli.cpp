@@ -9,13 +9,17 @@
 #include <cmath>
 
 #include <Magick++.h>
+#include <nlohmann/json.hpp>
 
 #include <assembly/filesystem.hpp>
 #include <assembly/database.hpp>
 #include <assembly/fdb_reader.hpp>
+#include <assembly/fdb_query.hpp>
 #include <assembly/stringutil.hpp>
 #include <assembly/cli.hpp>
 #include <assembly/functional.hpp>
+
+using namespace nlohmann;
 
 cli::opt_t fdb_options[] =
 {
@@ -77,18 +81,42 @@ std::ostream& operator<<(std::ostream& ostr, const FDB::Field& f)
     return ostr;
 }
 
-std::string to_json(const FDB::Field& f)
+const json fdb_to_json(const FDB::Field& f)
 {
     switch(f.type)
     {
-        case FDB::ValType::BOOLEAN: return f.int_val == 0 ? "false" : "true";
-        case FDB::ValType::INTEGER: return std::to_string(f.int_val);
-        case FDB::ValType::FLOAT:   return std::to_string(f.flt_val);
-        case FDB::ValType::BIGINT:  return std::to_string(f.i64_val);
+        case FDB::ValType::BOOLEAN: return json(f.int_val != 0);
+        case FDB::ValType::INTEGER: return json(f.int_val);
+        case FDB::ValType::FLOAT:   return json(f.flt_val);
+        case FDB::ValType::BIGINT:  return json(f.i64_val);
         case FDB::ValType::VARCHAR:
-        case FDB::ValType::TEXT: return '\"' + f.str_val + '\"';
+        case FDB::ValType::TEXT: return json(f.str_val);
     }
-    return "null";
+    return json();
+}
+
+std::string to_json_path(const std::string& path)
+{
+    return "lu-json/" + path + ".json";
+}
+
+std::string to_xml_path(const std::string& path)
+{
+    return "lu-xml/" + path + ".xml";
+}
+
+std::ofstream make_json_file(const std::string& path)
+{
+    std::string json_file = to_json_path(path);
+    fs::ensure_dir_exists(json_file);
+    return std::ofstream(json_file);
+}
+
+std::ofstream make_xml_file(const std::string& path)
+{
+    std::string xml_file = to_xml_path(path);
+    fs::ensure_dir_exists(xml_file);
+    return std::ofstream(xml_file);
 }
 
 int fdb_read(int argc, char** argv)
@@ -102,85 +130,99 @@ int fdb_read(int argc, char** argv)
     FDB::Schema schema;
     FDB::readFromFile(argv[1], schema);
 
-    //std::cout << "Pre Table" << std::endl;
-    FDB::Table& tbl = schema.table("ZoneTable");
-    //std::cout << "Pre Slot" << std::endl;
-    //FDB::Slot& slot = tbl.slot(1200);
-    //std::cout << "Pre Func" << std::endl;
-    //std::function<bool(const FDB::Row&)> funcA = [](const FDB::Row& row){ return row.fields.at(0).int_val > 1000; };
-    //std::function<bool(const FDB::Row&)> funcB = [](const FDB::Row& row){ return row.fields.at(0).int_val < 2300; };
-    //std::function<bool(const FDB::Row&)> func = logic::land(funcA, funcB);
-    //std::cout << "Pre Row" << std::endl;
-    //std::vector<FDB::Row> res = slot.query(func);
-    //std::cout << "Pre Loop" << std::endl;
+    const FDB::Table& tbl = schema.table("ZoneTable");
 
-    std::string tables_path = "tables";
-    std::string zone_table_path = tables_path + "/ZoneTable";
-    std::string zone_index_path = zone_table_path + "/index.json";
+    std::string path_tables = "tables";
+    std::string path_zones = "zones";
 
-    std::string index_path = "lu-json/" + zone_index_path;
-    fs::ensure_dir_exists(index_path);
-    std::ofstream zone_index(index_path);
+    std::string path_tables_zones = path_tables + "/ZoneTable";
+    std::string index_tables_zones = path_tables_zones + "/index";
 
-    bool started = false;
-    zone_index << "{" << std::endl;
-    zone_index << "  \"_links\": {" << std::endl;
-    zone_index << "    \"self\": { \"href\": \"/" <<  index_path << "\" }" << std::endl;
-    zone_index << "  }," << std::endl;
-    zone_index << "  \"_embedded\": {" << std::endl;
-    zone_index << "    \"ZoneTable\": [";
-    for (const FDB::Slot& s : tbl.slots)
+    std::ofstream zone_index = make_json_file(index_tables_zones);
+
+    json j_index;
+    j_index["_links"]["self"]["href"] =  "/" + to_json_path(index_tables_zones);
+    j_index["_embedded"]["ZoneTable"] = json::array();
+
+    auto id_sel = tbl.column_sel("zoneID");
+    auto file_sel = tbl.column_sel("zoneName");
+    auto display_sel = tbl.column_sel("DisplayDescription");
+
+    auto removed_filter = FDB::Query::Like("%__removed");
+
+    FDB::Query::ConstIterator it = FDB::Query::for_table(tbl);
+
+    while (it)
     {
-        for (const FDB::Row& r : s.rows)
+        const FDB::Row& r = *it;
+
+        const FDB::Field& file = file_sel(r);
+        const FDB::Field& display = display_sel(r);
+
+        if (!removed_filter(file) && display.type != FDB::ValType::NOTHING)
         {
-            const FDB::Field& file = r.fields.at(2);
-            const FDB::Field& display = r.fields.at(8);
+            const FDB::Field& zone_id = id_sel(r);
 
-            if (!ends_with(file.str_val, "__removed") && display.type != FDB::ValType::NOTHING)
+            std::string item_tables_zones = path_tables_zones + "/" + std::to_string(zone_id.int_val);
+            std::string item_zones = path_zones + "/" + std::to_string(zone_id.int_val);
+            std::ofstream zone = make_json_file(item_tables_zones);
+
+            json j_zone;
+            j_zone["_links"]["self"]["href"] = "/" + to_json_path(item_tables_zones);
+
+            for (int i = 0; i < tbl.columns.size(); i++)
             {
-                const FDB::Field& zone_id = r.fields.at(0);
-
-
-                std::string zone_path = zone_table_path + "/" + std::to_string(zone_id.int_val) + ".json";
-                std::string zone_path_str = "lu-json/" + zone_path;
-
-                fs::ensure_dir_exists(zone_path_str);
-                std::ofstream zone(zone_path_str);
-
-                zone << "{" << std::endl;
-                zone << "  \"_links\": {" << std::endl;
-                zone << "    \"self\": { \"href\": \"/" << zone_path_str << "\" }" << std::endl;
-                zone << "  }";
-
-                for (int i = 0; i < tbl.columns.size(); i++)
-                {
-                    zone << "," << std::endl;
-                    zone << "  \"" << tbl.columns.at(i).name << "\": ";
-                    zone << to_json(r.fields.at(i)) << std::endl;
-                }
-
-                zone << std::endl << "}" << std::endl;
-                zone.close();
-
-                if (started) { zone_index << ", "; }
-                zone_index << "{" << std::endl;
-                zone_index << "        \"_links\": {" << std::endl;
-                zone_index << "          \"self\": { \"href\": \"/" <<  zone_path_str << "\" }," << std::endl;
-                zone_index << "          \"level\": { \"href\": \"/lu-json/zones/" << zone_id << ".json\" }" << std::endl;
-                zone_index << "        }," << std::endl;
-                zone_index << "        \"id\": " << zone_id << "," << std::endl;
-                zone_index << "        \"file\": \"" << file << "\"," << std::endl;
-                zone_index << "        \"display\": \"" << display << "\"" << std::endl;
-                zone_index << "      }";
-                started = true;
+                j_zone[tbl.columns.at(i).name] = fdb_to_json(r.fields.at(i));
             }
-        }
-    }
-    zone_index << "]" << std::endl;
-    zone_index << "  }" << std::endl;
-    zone_index << "}" << std::endl;
 
+            zone << std::setw(2) << j_zone << std::endl;
+            zone.close();
+
+            json j_index_element;
+            j_index_element["_links"]["self"]["href"] = "/" + to_json_path(item_tables_zones);
+            j_index_element["_links"]["level"]["href"] = "/" + to_json_path(item_zones);
+
+            j_index_element["zoneID"] = zone_id.int_val;
+            j_index_element["zoneName"] = file.str_val;
+            j_index_element["DisplayDescription"] = display.str_val;
+
+            j_index["_embedded"]["ZoneTable"] += j_index_element;
+        }
+        ++it;
+    }
+
+    zone_index << std::setw(2) << j_index << std::endl;
     zone_index.close();
+
+    const FDB::Table& acc = schema.table("AccessoryDefaultLoc");
+    std::string path_tables_acc = path_tables + "/AccessoryDefaultLoc";
+    std::string index_tables_acc = path_tables_acc + "/index";
+
+    json j_acc_index;
+    j_acc_index["_links"]["self"]["href"] =  "/" + to_json_path(index_tables_acc);
+    j_acc_index["_embedded"]["AccessoryDefaultLoc"] = json::array();
+
+    it = FDB::Query::for_table(acc);
+
+    while (it)
+    {
+        const FDB::Row& r = *it;
+        json j_elem;
+
+        for (int i = 0; i < acc.columns.size(); i++)
+        {
+            j_elem[acc.columns.at(i).name] = fdb_to_json(r.fields.at(i));
+        }
+
+        j_acc_index["_embedded"]["AccessoryDefaultLoc"] += j_elem;
+
+        ++it;
+    }
+
+    std::ofstream acc_index = make_json_file(index_tables_acc);
+    acc_index << std::setw(2) << j_acc_index << std::endl;
+    acc_index.close();
+
     return 0;
 }
 

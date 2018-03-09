@@ -38,6 +38,7 @@ following libraries to be installed on your system:
 
 * zlib (https://www.zlib.net/)
 * Magick++ (http://www.imagemagick.org/Magick++/)
+* JSON for Modern C++ (https://github.com/nlohmann/json)
 * assembly (https://github.com/xiphoseer/assembly/)
 
 At the moment, all three of the are required, altough I may add
