@@ -13,6 +13,9 @@
 #define CRC_FXOR 0x00000000
 
 
+using namespace assembly::catalog;
+using namespace assembly::package;
+
 /**
  * The installation directory used
  */
@@ -21,7 +24,7 @@ std::string installDir = "./";
 /**
  *	The catalog for the current directory
  */
-CatalogFile catalog;
+catalog_file catalog;
 
 /**
  *	Updates a CRC value for the next byte
@@ -91,21 +94,22 @@ int32_t pack::SetInstallDir(char* strDirectory)
  */
 int32_t pack::GetPackIndex(uint32_t filenameCRC)
 {
-	CatalogPointer ptr = findByCRC(&catalog, filenameCRC);
+	catalog_ptr ptr = find_by_crc(&catalog, filenameCRC);
 	if (ptr.valid()) {
-		return ptr.packId();
+		return ptr.pack_id();
 	}
 	return -1;
 }
 
 int32_t pack::GetInfoForFile(uint32_t filenameCRC, int32_t packIndex, int32_t* bExists, int32_t* iUncompressedSize, char* uncompressedChecksum)
 {
-	std::string packName = catalog.packFiles.at(packIndex);
+	std::string packName = catalog.pack_files.at(packIndex);
 	std::replace(packName.begin(), packName.end(), '\\', '/');
-	PackageInfo packInfo;
-	packInfo.loadFromFile(installDir + packName);
 
-	PackagePointer ptr = findByCRC(&packInfo, filenameCRC);
+    package_info packInfo;
+	read_from_file(installDir + packName, packInfo);
+
+	package_ptr ptr = find_by_crc(&packInfo, filenameCRC);
 	if (ptr.valid())
 	{
 		*bExists = 1;
@@ -130,7 +134,7 @@ int32_t pack::MoveFileToPack
 {
 	uint32_t crc = GetCRCForFilename(strManifestFilename);
 	int32_t packIndex = GetPackIndex(crc);
-	std::string packFile = catalog.packFiles.at(packIndex);
+	std::string packFile = catalog.pack_files.at(packIndex);
 
 	std::fstream infile(installDir + packFile);
 	if (infile.is_open())
@@ -141,11 +145,11 @@ int32_t pack::MoveFileToPack
 		infile.read((char*) unknown, 4);
 		infile.seekg(dataAddr, infile.beg);
 
-		PackageInfo info;
-		info.loadFromStream(infile);
+		package_info info;
+		read_from_stream(infile, info);
 
 		infile.seekp(dataAddr, infile.beg);
-		info.saveToStream(infile);
+		write_to_stream(infile, info);
 
 		infile.write((char*) dataAddr, 4);
 		infile.write((char*) unknown, 4);
@@ -156,15 +160,15 @@ int32_t pack::MoveFileToPack
 
 int32_t pack::ReadPackCatalog(const char* strPackCatalogName)
 {
-	catalog.loadFromFile(strPackCatalogName);
-	return catalog.packFiles.size();
+	read_from_file(strPackCatalogName, catalog);
+	return catalog.pack_files.size();
 }
 
 int32_t pack::GetPackName(int32_t index, char* buffer, int32_t bufferLenght)
 {
-	if (index < catalog.packFiles.size())
+	if (index < catalog.pack_files.size())
 	{
-		std::string name = catalog.packFiles.at(index);
+		std::string name = catalog.pack_files.at(index);
 		strcpy(buffer, name.c_str());
 		return 0;
 	}

@@ -7,7 +7,7 @@
 #include "fdb_cli.hpp"
 #include "pipe_cli.hpp"
 #include "net_cli.hpp"
-
+#include "data_cli.hpp"
 
 #include "../config.h"
 
@@ -21,6 +21,7 @@ cli::opt_t main_options[] =
     {   "catalog",  &main_catalog,  "Show file info in a catalog"   },
     {   "pack",     &main_pack,     "Manipulate pack archives"      },
     {   "fdb",      &main_fdb,      "Manipulate a FileDataBase"     },
+    {   "data",     &main_data,     "Manipulate data files"         },
     {   "net",      &main_net,      "Network helpers"               },
     {   "test",     &main_test,     "Test some stuff"               },
     {   "help",     &main_help,     "Show this help"                },

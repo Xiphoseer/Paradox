@@ -29,6 +29,7 @@ elif test -n "$HAVE_IMAGEMAGICKXX"; then
 fi
 AC_SUBST(MAGICKXX_CFLAGS)
 AC_SUBST(MAGICKXX_LIBS)
+
 # Source: https://gist.github.com/kou1okada/8419424
 
 AC_CONFIG_HEADERS([config.h])

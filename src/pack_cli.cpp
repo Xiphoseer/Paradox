@@ -18,6 +18,12 @@
 
 #include "sd0_stream.hpp"
 
+
+using namespace assembly::package;
+using namespace assembly::manifest;
+using namespace assembly::catalog;
+
+
 cli::opt_t pack_options[] =
 {
 	{ "crc",			&pack_crc, 			"Compute CRC-23 has for a filename"					},
@@ -281,20 +287,20 @@ int pack_list (int argc, char** argv)
 {
 	if (argc > 2)
 	{
-		PackageInfo pack;
-		pack.loadFromFile(argv[1]);
+		package_info pack;
+		read_from_file(argv[1], pack);
 
-		ManifestFile manifest;
-		manifest.loadFromFile(argv[2]);
+		manifest_file manifest;
+        read_from_file(argv[2], manifest);
 
 		std::vector<map_t> files;
 
-		for (std::vector<PackageInfoEntry>::iterator it = pack.files.begin(); it != pack.files.end(); it++)
+		for (std::vector<package_info_entry>::iterator it = pack.files.begin(); it != pack.files.end(); it++)
 		{
 			files.push_back({it->crc, "???", (it->bCompressed & 0xFF) != 0});
 		}
 
-		for (std::vector<ManifestEntry>::iterator it = manifest.files.begin(); it != manifest.files.end(); it++)
+		for (std::vector<manifest_entry>::iterator it = manifest.files.begin(); it != manifest.files.end(); it++)
 		{
 			uint32_t crc = pack::GetCRCForFilename(it->path.c_str());
 			for (std::vector<map_t>::iterator in = files.begin(); in != files.end(); in++)
@@ -322,12 +328,12 @@ int pack_list (int argc, char** argv)
 	}
 }
 
-void print(PackagePointer ptr, int level, std::string prefix, bool top)
+void print(package_ptr ptr, int level, std::string prefix, bool top)
 {
 	if (ptr.valid())
 	{
-		PackagePointer l = ptr.left();
-		PackagePointer r = ptr.right();
+		package_ptr l = ptr.left();
+		package_ptr r = ptr.right();
 		print(l, level + 1, prefix + "  ", true);
 		prefix.replace(level * 2, 2, top ? "\xe2\x94\x8c\xe2\x94\x80" : "\xe2\x94\x94\xe2\x94\x80");
 		std::cout << prefix +
@@ -343,16 +349,16 @@ int pack_tree(int argc, char** argv)
 {
 	if (argc > 1)
 	{
-		PackageInfo info;
-		info.loadFromFile(argv[1]);
-		print(PackagePointer(&info), 0, "", false);
+		package_info info;
+		read_from_file(argv[1], info);
+		print(package_ptr(&info), 0, "", false);
 		return 0;
 	}
 	std::cout << "Usage: pack tree <packfile>" << std::endl;
 	return 1;
 }
 
-int32_t find_crc_index(CatalogFile& file, uint32_t crc)
+int32_t find_crc_index(catalog_file& file, uint32_t crc)
 {
 	int size = file.files.size();
 	int index =  (size > 0) ? size / 2 : -1;
@@ -369,11 +375,11 @@ int pack_all(int argc, char** argv)
 {
 	if (argc > 2)
 	{
-		ManifestFile manifest;
-		if (manifest.loadFromFile(argv[1]) != 0) return 1;
+		manifest_file manifest;
+		if (read_from_file(argv[1],manifest) != 0) return 1;
 
-		CatalogFile catalog;
-		if (catalog.loadFromFile(argv[2]) != 0) return 2;
+		catalog_file catalog;
+		if (read_from_file(argv[2],catalog) != 0) return 2;
 
 		std::vector<std::string> names;
 		int count = catalog.files.size();
@@ -410,11 +416,11 @@ int pack_missing(int argc, char** argv)
 {
 	if (argc > 2)
 	{
-		ManifestFile manifest;
-		if (manifest.loadFromFile(argv[1]) != 0) return 1;
+		manifest_file manifest;
+		if (read_from_file(argv[1],manifest) != 0) return 1;
 
-		CatalogFile catalog;
-		if (catalog.loadFromFile(argv[2]) != 0) return 2;
+		catalog_file catalog;
+		if (read_from_file(argv[2],catalog) != 0) return 2;
 
 		std::vector<std::string> names;
 
@@ -452,13 +458,13 @@ int pack_target(int argc, char** argv)
 {
 	if (argc > 3)
 	{
-		ManifestFile manifest;
-		if (manifest.loadFromFile(argv[1]) != 0) return 1;
+		manifest_file manifest;
+		if (read_from_file(argv[1],manifest) != 0) return 1;
 
-		CatalogFile catalog;
-		if (catalog.loadFromFile(argv[2]) != 0) return 2;
+		catalog_file catalog;
+		if (read_from_file(argv[2],catalog) != 0) return 2;
 
-		int32_t index = catalog.getPackIndex(argv[3]);
+		int32_t index = catalog.get_pack_index(argv[3]);
 
 		std::cout << "Index: " << index << std::endl;
 
@@ -467,7 +473,7 @@ int pack_target(int argc, char** argv)
 
 		for (int i = 0; i < catalog.files.size(); i++)
 		{
-			CatalogEntry e = catalog.files.at(i);
+			catalog_entry e = catalog.files.at(i);
 			if (e.pack == index)
 			{
 				crcs.push_back(e.crc);
@@ -528,24 +534,24 @@ int pack_full_extract(int argc, char** argv)
 
 		std::string out_dir = (argc > 4) ? std::string(argv[4]) : base_dir;
 
-		ManifestFile manifest;
-		if (manifest.loadFromFile(argv[1]) != 0) return 1;
+		manifest_file manifest;
+		if (read_from_file(argv[1],manifest) != 0) return 1;
 
-		CatalogFile catalog;
-		if (catalog.loadFromFile(argv[2]) != 0) return 2;
+		catalog_file catalog;
+		if (read_from_file(argv[2],catalog) != 0) return 2;
 
-		int packCount = catalog.packFiles.size();
+		int packCount = catalog.pack_files.size();
 
-		std::vector<PackageInfo> packFiles;
+		std::vector<package_info> packFiles;
 		packFiles.reserve(packCount);
 
 		for (int i = 0; i < packCount; i++)
 		{
-			 packFiles.push_back(PackageInfo());
-			 std::string path = catalog.packFiles.at(i);
+			 packFiles.push_back(package_info());
+			 std::string path = catalog.pack_files.at(i);
 			 std::replace(path.begin(), path.end(), '\\', '/');
 
-			 packFiles.at(i).loadFromFile(base_dir + path);
+			 read_from_file(base_dir + path, packFiles.at(i));
 			 std::cout << packFiles.at(i).files.size() << std::endl;
 		}
 
@@ -555,12 +561,12 @@ int pack_full_extract(int argc, char** argv)
 			std::cout << "Extracting: " << path << std::endl;
 			uint32_t crc = pack::GetCRCForFilename(path.c_str());
 
-			CatalogPointer ptr = findByCRC(&catalog, crc);
+			catalog_ptr ptr = find_by_crc(&catalog, crc);
 			if (!ptr.valid()) continue;
 
-			int id = ptr.packId();
+			int id = ptr.pack_id();
 
-			PackagePointer itr = findByCRC(&(packFiles.at(id)), crc);
+			package_ptr itr = find_by_crc(&(packFiles.at(id)), crc);
 			if (!itr.valid()) continue;
 
 			std::replace(path.begin(), path.end(), '\\', '/');
@@ -571,7 +577,7 @@ int pack_full_extract(int argc, char** argv)
 
 			if (ofile.is_open())
 			{
-				std::string pth = catalog.packFiles.at(ptr.packId());
+				std::string pth = catalog.pack_files.at(ptr.pack_id());
 				std::replace(pth.begin(),pth.end(), '\\', '/');
 				std::ifstream ifile(base_dir + pth);
 
@@ -609,9 +615,9 @@ int main_catalog (int argc, char** argv)
 {
 	if (argc > 2)
 	{
-		CatalogFile catalog;
-		catalog.loadFromFile(argv[1]);
-		CatalogPointer ptr = findByCRC(&catalog, pack::GetCRCForFilename(argv[2]));
+		catalog_file catalog;
+		read_from_file(argv[1],catalog);
+		catalog_ptr ptr = find_by_crc(&catalog, pack::GetCRCForFilename(argv[2]));
 		if (ptr.valid())
 		{
 			std::cout << std::setw(20) << "Filename: " << argv[2] << std::endl;
