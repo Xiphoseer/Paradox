@@ -94,11 +94,12 @@ int32_t pack::SetInstallDir(char* strDirectory)
  */
 int32_t pack::GetPackIndex(uint32_t filenameCRC)
 {
-	catalog_ptr ptr = find_by_crc(&catalog, filenameCRC);
-	if (ptr.valid()) {
-		return ptr.pack_id();
-	}
-	return -1;
+    catalog_ptr ptr = find_by_crc(&catalog, filenameCRC);
+    if (ptr.valid())
+    {
+        return ptr.pack_id();
+    }
+    return -1;
 }
 
 int32_t pack::GetInfoForFile(uint32_t filenameCRC, int32_t packIndex, int32_t* bExists, int32_t* iUncompressedSize, char* uncompressedChecksum)

@@ -1,0 +1,6 @@
+.TH pktool 1 "April 24, 2018" "" "PK-Tool"
+
+.SH NAME
+pktool \- program for reading and manipulating
+.B LEGO® Universe 
+packaging files.

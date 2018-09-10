@@ -1,0 +1,54 @@
+.TH pktool-manifest 1 "April 24, 2018" "" "PK-Tool Manifest"
+
+.SH NAME
+pktool-manifest \- program for reading and manipulating
+.B LEGO® Universe
+.I *.pk
+files.
+
+.SH SYNOPSIS
+.B pktool manifest
+[\fIOPTION\fR]... [\fIFILE\fR]...
+.br
+
+.SH DESCRIPTION
+This manual page explains the
+.B pktool-manifest
+program. This program...
+.PP
+\fBpktool\fP is for...
+
+.SH OPTIONS
+.TP
+.BR \-C ", " \-\-show\-checksum
+This option forces the file checksum to be shown
+.TP
+.BR \-c ", " \-\-hide\-checksum
+This option forces the file checksum to be hidden
+.TP
+.BR \-F ", " \-\-show\-file\-version
+This option forces the file version to be shown
+.TP
+.BR \-f ", " \-\-hide\-file\-version
+This option forces the file version to be hidden
+.TP
+.BR \-V ", " \-\-show\-version
+This option forces the game version to be shown
+.TP
+.BR \-v ", " \-\-hide\-version
+This option forces the game version to be hidden
+.TP
+.BR \-T ", " \-\-show\-total
+This option forces the amount of entries to be shown
+.TP
+.BR \-t ", " \-\-hide\-total
+This option forces the amount of entries to be hidden
+.TP
+\fB\-q \fIpattern\fR, \fB\-\-filter\fR \fIpattern\fR, \fB\-\-query \fIpattern\fR, \fB\-\-search \fIpattern\fR
+This option will only print those entries which match the provided \fIfnmatch\fR query.
+
+.SH NOTES
+
+.SH EXAMPLE
+
+.SH "SEE ALSO"

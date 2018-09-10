@@ -1,0 +1,30 @@
+.\"Created with GNOME Manpages Editor Wizard
+.\"http://sourceforge.net/projects/gmanedit2
+.TH paradox 1 "April 24, 2018" "" "Paradox - LU Dev Tool"
+
+.SH NAME
+paradox \- program for developing LEGO(R) Universe server emulators and similar software
+
+.SH SYNOPSIS
+.B paradox
+.RI [ options ]
+.br
+
+.SH DESCRIPTION
+This manual page explains the
+.B paradox
+program. This program...
+.PP
+\fBparadox\fP is for...
+
+.SH OPTIONS
+.B
+.IP -OPTION
+This option...
+
+.SH NOTES
+
+.SH EXAMPLE
+
+.SH "SEE ALSO"
+
