@@ -1,3 +1,4 @@
+SUBDIRS = fdbcli
 bin_PROGRAMS = paradox pktool
 
 paradox_SOURCES = main.cpp md5.c pack.cpp pipeline.cpp transform.cpp \
