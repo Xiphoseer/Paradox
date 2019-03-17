@@ -289,20 +289,9 @@ int store_missions_tables(const assembly::database::schema& schema)
   const auto tbl = schema.at("Missions");
   auto it = assembly::database::query::for_table(tbl);
 
-  auto id_def = tbl.column_def("id");
-  auto dt_def = tbl.column_def("defined_type");
-  auto ds_def = tbl.column_def("defined_subtype");
-
-  std::cout << id_def.first
-    << ", " << dt_def.first
-    << ", " << ds_def.first
-    << std::endl;
-
   auto id_sel = tbl.column_sel("id");
   auto defined_type_sel = tbl.column_sel("defined_type");
   auto defined_subtype_sel = tbl.column_sel("defined_subtype");
-
-  utf::iconv_to_utf8 conv("WINDOWS-1251");
 
   json j_missions;
 
@@ -310,14 +299,10 @@ int store_missions_tables(const assembly::database::schema& schema)
     auto row = *it;
     auto id = id_sel(row).int_val;
 
-    try {
-      std::string defined_type = conv(defined_type_sel(row).str_val);
-      std::string defined_subtype = conv(defined_subtype_sel(row).str_val);
+    auto defined_type = defined_type_sel(row).get_str("");
+    auto defined_subtype = defined_subtype_sel(row).get_str("");
 
-      j_missions[defined_type][defined_subtype] += id;
-    } catch (std::runtime_error& e) {
-      std::cout << "Could not load mission " << id << std::endl;
-    }
+    j_missions[defined_type][defined_subtype] += id;
 
     ++it;
   }
