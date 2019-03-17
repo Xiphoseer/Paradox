@@ -11,6 +11,7 @@
 #include <Magick++.h>
 #include <nlohmann/json.hpp>
 
+#include <assembly/utf.hpp>
 #include <assembly/filesystem.hpp>
 #include <assembly/database.hpp>
 #include <assembly/fdb_io.hpp>
@@ -276,6 +277,57 @@ void store_single_table(const assembly::database::schema& schema, const std::str
     std::ofstream single_index = make_json_file(index_tables_single);
     single_index << std::setw(2) << j_single_index << std::endl;
     single_index.close();
+}
+
+/*
+ * Stores the missions grouped by their types
+ */
+int store_missions_tables(const assembly::database::schema& schema)
+{
+  std::cout << "=== Mission Index ===" << std::endl;
+
+  const auto tbl = schema.at("Missions");
+  auto it = assembly::database::query::for_table(tbl);
+
+  auto id_def = tbl.column_def("id");
+  auto dt_def = tbl.column_def("defined_type");
+  auto ds_def = tbl.column_def("defined_subtype");
+
+  std::cout << id_def.first
+    << ", " << dt_def.first
+    << ", " << ds_def.first
+    << std::endl;
+
+  auto id_sel = tbl.column_sel("id");
+  auto defined_type_sel = tbl.column_sel("defined_type");
+  auto defined_subtype_sel = tbl.column_sel("defined_subtype");
+
+  utf::iconv_to_utf8 conv("WINDOWS-1251");
+
+  json j_missions;
+
+  while (it) {
+    auto row = *it;
+    auto id = id_sel(row).int_val;
+
+    try {
+      std::string defined_type = conv(defined_type_sel(row).str_val);
+      std::string defined_subtype = conv(defined_subtype_sel(row).str_val);
+
+      j_missions[defined_type][defined_subtype] += id;
+    } catch (std::runtime_error& e) {
+      std::cout << "Could not load mission " << id << std::endl;
+    }
+
+    ++it;
+  }
+
+  const std::string path_missions = "tables/Missions";
+  const std::string index_missions = path_missions + "/groupBy/type";
+  std::ofstream missions = make_json_file(index_missions);
+
+  missions << std::setw(2) << j_missions << std::endl;
+  missions.close();
 }
 
 int fdb_read(int argc, char** argv)
@@ -588,6 +640,7 @@ int fdb_read(int argc, char** argv)
 
     // Missions
 
+    store_missions_tables(schema);
     store_paged_table(schema, path_tables, "Missions");
     store_paged_table(schema, path_tables, "MissionEmail");
     store_paged_table(schema, path_tables, "MissionText");
