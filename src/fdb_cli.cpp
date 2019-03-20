@@ -83,6 +83,8 @@ std::ostream& operator<<(std::ostream& ostr, const assembly::database::field& f)
     return ostr;
 }
 
+const utf::iconv_to_utf8 fromLatin1("ISO-8859-1");
+
 const json fdb_to_json(const assembly::database::field& f)
 {
     switch(f.type)
@@ -92,7 +94,7 @@ const json fdb_to_json(const assembly::database::field& f)
         case assembly::database::value_type::FLOAT:   return json(f.flt_val);
         case assembly::database::value_type::BIGINT:  return json(f.i64_val);
         case assembly::database::value_type::VARCHAR:
-        case assembly::database::value_type::TEXT: return json(f.str_val);
+        case assembly::database::value_type::TEXT: return json(fromLatin1(f.str_val));
     }
     return json();
 }
@@ -166,11 +168,27 @@ void store_table
 
         for (int i = 0; i < table.columns.size(); i++)
         {
+          try
+          {
             j_elem[table.columns.at(i).name] = fdb_to_json(r.fields.at(i));
+          }
+          catch (std::runtime_error err)
+          {
+            std::cerr << "Error '" << err.what() << " while processing PK " << id << ", COL " << i << std::endl;
+          }
         }
 
+
         std::ofstream table_elem = make_json_file(item_tables_table);
-        table_elem << std::setw(2) << j_elem << std::endl;
+        try
+        {
+          table_elem << std::setw(2) << j_elem << std::endl;
+        }
+        catch (nlohmann::detail::type_error err)
+        {
+            // TODO: Investigate why some strings are invalid UTF-8
+            std::cerr << "Error '" << err.what() << " while processing PK " << id << std::endl;
+        }
         table_elem.close();
 
         ++it;
@@ -279,9 +297,7 @@ void store_single_table(const assembly::database::schema& schema, const std::str
     single_index.close();
 }
 
-/*
- * Stores the missions grouped by their types
- */
+//! Stores the missions grouped by their types
 int store_missions_tables(const assembly::database::schema& schema)
 {
   std::cout << "=== Mission Index ===" << std::endl;
@@ -315,6 +331,410 @@ int store_missions_tables(const assembly::database::schema& schema)
   missions.close();
 }
 
+//! Stores the tables for the zones
+void store_zone_tables(
+  const assembly::database::schema& schema,
+  const std::string& path_tables,
+  const std::string& path_zones)
+{
+  std::cout << "=== ZoneTable ===" << std::endl;
+
+  const assembly::database::table& tbl = schema.at("ZoneTable");
+
+  std::string path_tables_zones = path_tables + "/ZoneTable";
+  std::string index_tables_zones = path_tables_zones + "/index";
+
+  std::ofstream zone_index = make_json_file(index_tables_zones);
+
+  json j_index;
+  j_index["_links"]["self"]["href"] =  "/" + to_json_path(index_tables_zones);
+  j_index["_embedded"]["ZoneTable"] = json::array();
+
+  auto id_sel = tbl.column_sel("zoneID");
+  auto file_sel = tbl.column_sel("zoneName");
+  auto display_sel = tbl.column_sel("DisplayDescription");
+
+  auto removed_filter = assembly::database::query::like("%__removed");
+
+  assembly::database::query::const_iterator it = assembly::database::query::for_table(tbl);
+
+  while (it)
+  {
+    const assembly::database::row& r = *it;
+
+    const assembly::database::field& file = file_sel(r);
+    const assembly::database::field& display = display_sel(r);
+
+    if (!removed_filter(file) && display.type != assembly::database::value_type::NOTHING)
+    {
+      const assembly::database::field& zone_id = id_sel(r);
+
+      std::string item_tables_zones = path_tables_zones + "/" + std::to_string(zone_id.int_val);
+      std::string item_zones = path_zones + "/" + std::to_string(zone_id.int_val);
+      std::ofstream zone = make_json_file(item_tables_zones);
+
+      json j_zone;
+      j_zone["_links"]["self"]["href"] = "/" + to_json_path(item_tables_zones);
+
+      for (int i = 0; i < tbl.columns.size(); i++)
+      {
+        j_zone[tbl.columns.at(i).name] = fdb_to_json(r.fields.at(i));
+      }
+
+      zone << std::setw(2) << j_zone << std::endl;
+      zone.close();
+
+      json j_index_element;
+      j_index_element["_links"]["self"]["href"] = "/" + to_json_path(item_tables_zones);
+      j_index_element["_links"]["level"]["href"] = "/" + to_json_path(item_zones);
+
+      j_index_element["zoneID"] = zone_id.int_val;
+      j_index_element["zoneName"] = file.str_val;
+      j_index_element["DisplayDescription"] = display.str_val;
+
+      j_index["_embedded"]["ZoneTable"] += j_index_element;
+    }
+    ++it;
+  }
+
+  zone_index << std::setw(2) << j_index << std::endl;
+  zone_index.close();
+}
+
+//! Stores the tables for the behaviors
+void store_behavior_tables(
+  const assembly::database::schema& schema,
+  const std::string& path_behaviors)
+{
+  std::cout << "=== Behaviors ===" << std::endl;
+
+  int max_key = 65536;
+  int behaviorID = 0;
+  int page_index = 0;
+  int page_size = 1024;
+
+  const assembly::database::table& behavior_params = schema.at("BehaviorParameter");
+  const assembly::database::table& behavior_template = schema.at("BehaviorTemplate");
+
+  auto behavior_template_behavior_id_sel = behavior_template.column_sel("behaviorID");
+  auto behavior_template_template_id_sel = behavior_template.column_sel("templateID");
+  auto behavior_template_effect_id_sel = behavior_template.column_sel("effectID");
+  auto behavior_template_effect_handle_sel = behavior_template.column_sel("effectHandle");
+
+  auto behavior_params_behavior_id_sel = behavior_params.column_sel("behaviorID");
+  auto behavior_params_parameter_id_sel = behavior_params.column_sel("parameterID");
+  auto behavior_params_value_sel = behavior_params.column_sel("value");
+
+  std::string index_behaviors = path_behaviors + "/index";
+
+  std::string current_folder = path_behaviors + "/0";
+  std::string current_page = current_folder + "/index";
+
+  json j_behavior_index;
+  j_behavior_index["_links"]["self"]["href"] = "/" + to_json_path(index_behaviors);
+  j_behavior_index["_links"]["first"]["href"] = "/" + to_json_path(current_page);
+
+  json j_behavior_page;
+
+  while (behaviorID < max_key)
+  {
+      bool found = false;
+      int slot = behaviorID % 35536;
+
+      int new_page_index = behaviorID / 1024;
+      if (new_page_index > page_index)
+      {
+          current_folder = path_behaviors + "/" + std::to_string(new_page_index);
+          std::string next_page = current_folder + "/index";
+
+          j_behavior_page["_links"]["next"]["href"] = "/" + to_json_path(next_page);
+          j_behavior_page["_links"]["self"]["href"] = "/" + to_json_path(current_page);
+
+          json j_index_entry;
+          j_index_entry["_links"]["self"]["href"] = "/" + to_json_path(current_page);
+
+          j_behavior_index["_embedded"]["pages"] += j_index_entry;
+
+          std::ofstream page_path = make_json_file(current_page);
+          page_path << std::setw(2) << j_behavior_page << std::endl;
+          page_path.close();
+
+          j_behavior_page = json();
+          j_behavior_page["_links"]["prev"]["href"] = "/" + to_json_path(current_page);
+
+          current_page = next_page;
+          page_index = new_page_index;
+      }
+
+      std::string current = current_folder + "/" + std::to_string(behaviorID);
+
+      json j_behavior;
+      assembly::database::query::int_eq checkID(behaviorID);
+
+      const assembly::database::slot& params_slot = behavior_params.slots.at(slot);
+      const assembly::database::slot& template_slot = behavior_template.slots.at(slot);
+
+      for (const assembly::database::row& row : template_slot.rows)
+      {
+          auto id_field = behavior_template_behavior_id_sel(row);
+          if (id_field.type == assembly::database::value_type::INTEGER && id_field.int_val > max_key)
+          {
+              max_key = id_field.int_val + 1;
+          }
+
+          if (checkID(id_field))
+          {
+              j_behavior["_links"]["self"]["href"] = "/" + to_json_path(current);
+
+              j_behavior["behaviorID"] = fdb_to_json(id_field);
+              j_behavior["templateID"] = fdb_to_json(behavior_template_template_id_sel(row));
+              j_behavior["effectID"] = fdb_to_json(behavior_template_effect_id_sel(row));
+              j_behavior["effectHandle"] = fdb_to_json(behavior_template_effect_handle_sel(row));
+
+              j_behavior_page["_embedded"]["behaviors"] += j_behavior;
+          }
+          found = true;
+      }
+
+      for (const assembly::database::row& row : params_slot.rows)
+      {
+          auto id_field = behavior_params_behavior_id_sel(row);
+          if (id_field.type == assembly::database::value_type::INTEGER && id_field.int_val > max_key)
+          {
+              max_key = id_field.int_val + 1;
+          }
+
+          if (checkID(id_field))
+          {
+              auto key_field = behavior_params_parameter_id_sel(row);
+              if (key_field.type == assembly::database::value_type::TEXT || key_field.type == assembly::database::value_type::VARCHAR)
+              {
+                  std::string key = key_field.str_val;
+                  j_behavior["parameters"][key] = fdb_to_json(behavior_params_value_sel(row));
+              }
+          }
+      }
+
+      if (found)
+      {
+          std::ofstream behavior_file = make_json_file(current);
+          behavior_file << std::setw(2) << j_behavior << std::endl;
+      }
+
+      behaviorID++;
+  }
+
+  j_behavior_page["_links"]["self"]["href"] = "/" + to_json_path(current_page);
+
+  json j_index_entry;
+  j_index_entry["_links"]["self"]["href"] = "/" + to_json_path(current_page);
+
+  j_behavior_index["_embedded"]["pages"] += j_index_entry;
+  j_behavior_index["_links"]["last"]["href"] = "/" + to_json_path(current_page);
+
+  std::ofstream page_path = make_json_file(current_page);
+  page_path << std::setw(2) << j_behavior_page << std::endl;
+  page_path.close();
+
+  std::ofstream index_file = make_json_file(index_behaviors);
+  index_file << std::setw(2) << j_behavior_index << std::endl;
+  index_file.close();
+}
+
+void store_loot_tables(
+  const assembly::database::schema& schema,
+  const std::string path_tables)
+{
+  std::cout << "=== LootTable ===" << std::endl;
+  const assembly::database::table& loot_table = schema.at("LootTable");
+  std::string path_tables_loot = path_tables + "/LootTable";
+  std::string path_tables_loot__itemid = path_tables_loot + "/groupBy/itemid";
+  std::string path_tables_loot__index = path_tables_loot + "/groupBy/LootTableIndex";
+
+  json j_loot_table;
+
+  for (const assembly::database::slot& slot: loot_table.slots)
+  {
+    json j_elem;
+
+    for (const assembly::database::row& r : slot.rows)
+    {
+      json j_elem_part;
+
+      assembly::database::field id_field = r.fields.at(0);
+      assembly::database::field lti_field = r.fields.at(1);
+
+      int id = id_field.int_val;
+      int lti = lti_field.int_val;
+
+      for (int i = 2; i < loot_table.columns.size(); i++)
+      {
+        j_elem_part[loot_table.columns.at(i).name] = fdb_to_json(r.fields.at(i));
+      }
+
+      json j_item_part(j_elem_part);
+      j_item_part.emplace("LootTableIndex", lti);
+
+      json j_loot_part(j_elem_part);
+      j_loot_part.emplace("itemid", id);
+
+      j_elem[std::to_string(id)]["elements"] += j_item_part;
+      j_loot_table[std::to_string(lti)]["elements"] += j_loot_part;
+    }
+
+    for (json::iterator it = j_elem.begin(); it != j_elem.end(); ++it)
+    {
+      int i = std::stoi(it.key());
+      int page = i / 256;
+      it.value()["itemid"] = i;
+
+      std::string item_tables_loot_table = path_tables_loot__itemid
+        + "/" + std::to_string(page) + "/" + std::to_string(i);
+      std::ofstream loot_table_elem = make_json_file(item_tables_loot_table);
+      loot_table_elem << std::setw(2) << it.value() << std::endl;
+      loot_table_elem.close();
+    }
+  }
+
+  for (json::iterator it = j_loot_table.begin(); it != j_loot_table.end(); ++it)
+  {
+    int i = std::stoi(it.key());
+    int page = i / 256;
+    it.value()["LootTableIndex"] = i;
+
+    std::string item_tables_loot_table = path_tables_loot__index
+        + "/" + std::to_string(page) + "/" + std::to_string(i);
+    std::ofstream loot_table_elem = make_json_file(item_tables_loot_table);
+    loot_table_elem << std::setw(2) << it.value() << std::endl;
+    loot_table_elem.close();
+  }
+
+  j_loot_table.clear();
+}
+
+void store_object_tables(
+  const assembly::database::schema& schema,
+  const std::string& path_objects)
+{
+  std::cout << "=== Objects ===" << std::endl;
+  const assembly::database::table& objects = schema.at("Objects"); // 16384
+  const assembly::database::table& components = schema.at("ComponentsRegistry"); // 32768
+  const assembly::database::table& oskill = schema.at("ObjectSkills"); // 4096
+  const assembly::database::table& mIcon = schema.at("mapIcon"); // 4096
+
+  auto objects_id_sel = objects.column_sel("id");
+  auto objects_type_sel = objects.column_sel("type");
+  auto objects_name_sel = objects.column_sel("name");
+
+  auto it = assembly::database::query::for_table(objects);
+  json j_objects_by_type;
+
+  while (it)
+  {
+    json j_object;
+    const assembly::database::row& r = *it;
+
+    int objID = objects_id_sel(r).int_val;
+    assembly::database::query::int_eq checkID(objID);
+
+    // Load all fields
+    for (int i = 0; i < objects.columns.size(); i++)
+    {
+      try
+      {
+        j_object[objects.columns.at(i).name] = fdb_to_json(r.fields.at(i));
+      }
+      catch (std::runtime_error err)
+      {
+        std::cerr << "Error while processing PK " << objID << ", COL " << i << std::endl
+                  << "  what(): " << err.what() << std::endl;
+      }
+    }
+
+    // Store byType
+    std::string type = fromLatin1(objects_type_sel(r).get_str(""));
+    std::string name = fromLatin1(objects_name_sel(r).get_str(""));
+    json j_object_ref;
+    j_object_ref["id"] = objID;
+    j_object_ref["name"] = name;
+    j_objects_by_type[type] += j_object_ref;
+
+    for (const assembly::database::row& row: components.at(objID).rows)
+    {
+      auto id_field = row.fields.at(0);
+      if (checkID(id_field))
+      {
+        j_object["components"][std::to_string(row.fields.at(1).int_val)] = row.fields.at(2).int_val;
+      }
+    }
+
+    for (const assembly::database::row& row: oskill.at(objID).rows)
+    {
+      auto id_field = row.fields.at(0);
+      if (checkID(id_field))
+      {
+        json j_skill;
+        j_skill["skillID"] = row.fields.at(1).int_val;
+        j_skill["castOnType"] = row.fields.at(2).int_val;
+        j_skill["AICombatWeight"] = row.fields.at(3).int_val;
+        j_object["skills"] += j_skill;
+      }
+    }
+
+    for (const assembly::database::row& row: mIcon.at(objID).rows)
+    {
+      auto id_field = row.fields.at(0);
+      if (checkID(id_field))
+      {
+        json j_icon;
+        j_icon["iconID"] = row.fields.at(1).int_val;
+        j_icon["iconState"] = row.fields.at(2).int_val;
+        j_object["icons"] += j_icon;
+      }
+    }
+
+    int fold_a = objID / 256;
+    int fold_b = fold_a / 256;
+
+    std::string elem_objects = path_objects + "/" +
+      std::to_string(fold_b) + "/" +
+      std::to_string(fold_a) + "/" +
+      std::to_string(objID);
+
+
+    std::ofstream object_file = make_json_file(elem_objects);
+    try
+    {
+      object_file << std::setw(2) << j_object << std::endl;
+    }
+    catch (nlohmann::detail::type_error err)
+    {
+      // TODO: Investigate why some strings are invalid UTF-8
+      std::cerr << "Error '" << err.what() << " while processing PK " << objID << std::endl;
+    }
+    object_file.close();
+
+    ++it;
+  }
+
+  json j_objects_type_index;
+  std::string path_objects_by_type = path_objects + "/groupBy/type";
+  std::string index_objects_by_type = path_objects_by_type + "/index";
+
+  for (json::iterator it = j_objects_by_type.begin(); it != j_objects_by_type.end(); ++it)
+  {
+    j_objects_type_index["types"] += it.key();
+    std::string elem_object_type = path_objects_by_type + "/" + it.key();
+    std::ofstream type_file = make_json_file(elem_object_type);
+    type_file << std::setw(2) << it.value() << std::endl;
+    type_file.close();
+  }
+
+  std::ofstream type_index_file = make_json_file(index_objects_by_type);
+  type_index_file << std::setw(2) << j_objects_type_index << std::endl;
+  type_index_file.close();
+}
+
 int fdb_read(int argc, char** argv)
 {
     if (argc <= 1)
@@ -326,290 +746,28 @@ int fdb_read(int argc, char** argv)
     assembly::database::schema schema;
     assembly::database::io::read_from_file(argv[1], schema);
 
-    std::cout << "=== ZoneTable ===" << std::endl;
-
-    const assembly::database::table& tbl = schema.at("ZoneTable");
-
     std::string path_tables = "tables";
     std::string path_zones = "zones";
+    std::string path_behaviors = "behaviors";
+    std::string path_objects = "objects";
 
-    std::string path_tables_zones = path_tables + "/ZoneTable";
-    std::string index_tables_zones = path_tables_zones + "/index";
-
-    std::ofstream zone_index = make_json_file(index_tables_zones);
-
-    json j_index;
-    j_index["_links"]["self"]["href"] =  "/" + to_json_path(index_tables_zones);
-    j_index["_embedded"]["ZoneTable"] = json::array();
-
-    auto id_sel = tbl.column_sel("zoneID");
-    auto file_sel = tbl.column_sel("zoneName");
-    auto display_sel = tbl.column_sel("DisplayDescription");
-
-    auto removed_filter = assembly::database::query::like("%__removed");
-
-    assembly::database::query::const_iterator it = assembly::database::query::for_table(tbl);
-
-    while (it)
-    {
-        const assembly::database::row& r = *it;
-
-        const assembly::database::field& file = file_sel(r);
-        const assembly::database::field& display = display_sel(r);
-
-        if (!removed_filter(file) && display.type != assembly::database::value_type::NOTHING)
-        {
-            const assembly::database::field& zone_id = id_sel(r);
-
-            std::string item_tables_zones = path_tables_zones + "/" + std::to_string(zone_id.int_val);
-            std::string item_zones = path_zones + "/" + std::to_string(zone_id.int_val);
-            std::ofstream zone = make_json_file(item_tables_zones);
-
-            json j_zone;
-            j_zone["_links"]["self"]["href"] = "/" + to_json_path(item_tables_zones);
-
-            for (int i = 0; i < tbl.columns.size(); i++)
-            {
-                j_zone[tbl.columns.at(i).name] = fdb_to_json(r.fields.at(i));
-            }
-
-            zone << std::setw(2) << j_zone << std::endl;
-            zone.close();
-
-            json j_index_element;
-            j_index_element["_links"]["self"]["href"] = "/" + to_json_path(item_tables_zones);
-            j_index_element["_links"]["level"]["href"] = "/" + to_json_path(item_zones);
-
-            j_index_element["zoneID"] = zone_id.int_val;
-            j_index_element["zoneName"] = file.str_val;
-            j_index_element["DisplayDescription"] = display.str_val;
-
-            j_index["_embedded"]["ZoneTable"] += j_index_element;
-        }
-        ++it;
-    }
-
-    zone_index << std::setw(2) << j_index << std::endl;
-    zone_index.close();
+    store_zone_tables(schema, path_tables, path_zones);
 
     store_single_table(schema, path_tables, "AccessoryDefaultLoc");
     store_single_table(schema, path_tables, "BrickColors");
     store_single_table(schema, path_tables, "EventGating");
     store_single_table(schema, path_tables, "Factions");
 
-    std::cout << "=== Behaviors ===" << std::endl;
-
-    int max_key = 65536;
-    int behaviorID = 0;
-    int page_index = 0;
-    int page_size = 1024;
-
-    const assembly::database::table& behavior_params = schema.at("BehaviorParameter");
-    const assembly::database::table& behavior_template = schema.at("BehaviorTemplate");
-
-    std::string path_behaviors = "behaviors";
-    std::string index_behaviors = path_behaviors + "/index";
-
-    std::string current_folder = path_behaviors + "/0";
-    std::string current_page = current_folder + "/index";
-
-    json j_behavior_index;
-    j_behavior_index["_links"]["self"]["href"] = "/" + to_json_path(index_behaviors);
-    j_behavior_index["_links"]["first"]["href"] = "/" + to_json_path(current_page);
-
-    json j_behavior_page;
-
-    while (behaviorID < max_key)
-    {
-        bool found = false;
-        int slot = behaviorID % 35536;
-
-        int new_page_index = behaviorID / 1024;
-        if (new_page_index > page_index)
-        {
-            current_folder = path_behaviors + "/" + std::to_string(new_page_index);
-            std::string next_page = current_folder + "/index";
-
-            j_behavior_page["_links"]["next"]["href"] = "/" + to_json_path(next_page);
-            j_behavior_page["_links"]["self"]["href"] = "/" + to_json_path(current_page);
-
-            json j_index_entry;
-            j_index_entry["_links"]["self"]["href"] = "/" + to_json_path(current_page);
-
-            j_behavior_index["_embedded"]["pages"] += j_index_entry;
-
-            std::ofstream page_path = make_json_file(current_page);
-            page_path << std::setw(2) << j_behavior_page << std::endl;
-            page_path.close();
-
-            j_behavior_page = json();
-            j_behavior_page["_links"]["prev"]["href"] = "/" + to_json_path(current_page);
-
-            current_page = next_page;
-            page_index = new_page_index;
-        }
-
-        std::string current = current_folder + "/" + std::to_string(behaviorID);
-
-        json j_behavior;
-        assembly::database::query::int_eq checkID(behaviorID);
-
-        const assembly::database::slot& params_slot = behavior_params.slots.at(slot);
-        const assembly::database::slot& template_slot = behavior_template.slots.at(slot);
-
-        for (const assembly::database::row& row : template_slot.rows)
-        {
-            auto id_field = row.fields.at(0);
-            if (id_field.type == assembly::database::value_type::INTEGER && id_field.int_val > max_key)
-            {
-                max_key = id_field.int_val + 1;
-            }
-
-            if (checkID(id_field))
-            {
-                j_behavior["_links"]["self"]["href"] = "/" + to_json_path(current);
-                j_behavior["behaviorID"] = fdb_to_json(row.fields.at(0));
-                j_behavior["templateID"] = fdb_to_json(row.fields.at(1));
-                j_behavior["effectID"] = fdb_to_json(row.fields.at(2));
-                j_behavior["effectHandle"] = fdb_to_json(row.fields.at(3));
-
-                j_behavior_page["_embedded"]["behaviors"] += j_behavior;
-            }
-            found = true;
-        }
-
-        for (const assembly::database::row& row : params_slot.rows)
-        {
-            auto id_field = row.fields.at(0);
-            if (id_field.type == assembly::database::value_type::INTEGER && id_field.int_val > max_key)
-            {
-                max_key = id_field.int_val + 1;
-            }
-
-            if (checkID(id_field))
-            {
-                auto key_field = row.fields.at(1);
-                if (key_field.type == assembly::database::value_type::TEXT || key_field.type == assembly::database::value_type::VARCHAR)
-                {
-                    std::string key = key_field.str_val;
-                    j_behavior["parameters"][key] = fdb_to_json(row.fields.at(2));
-                }
-            }
-        }
-
-        if (found)
-        {
-            std::ofstream behavior_file = make_json_file(current);
-            behavior_file << std::setw(2) << j_behavior << std::endl;
-        }
-
-        behaviorID++;
-    }
-
-    j_behavior_page["_links"]["self"]["href"] = "/" + to_json_path(current_page);
-
-    json j_index_entry;
-    j_index_entry["_links"]["self"]["href"] = "/" + to_json_path(current_page);
-
-    j_behavior_index["_embedded"]["pages"] += j_index_entry;
-    j_behavior_index["_links"]["last"]["href"] = "/" + to_json_path(current_page);
-
-    std::ofstream page_path = make_json_file(current_page);
-    page_path << std::setw(2) << j_behavior_page << std::endl;
-    page_path.close();
-
-    std::ofstream index_file = make_json_file(index_behaviors);
-    index_file << std::setw(2) << j_behavior_index << std::endl;
-    index_file.close();
-
-
-    std::cout << "=== SkillBehavior ===" << std::endl;
-    const assembly::database::table& skills = schema.at("SkillBehavior");
-    std::string path_tables_skills = path_tables + "/SkillBehavior";
-
-    it = assembly::database::query::for_table(skills);
-
-    while (it)
-    {
-        const assembly::database::row& r = *it;
-        json j_elem;
-
-        int id = r.fields.at(0).int_val;
-        std::string item_tables_skills = path_tables_skills + "/" + std::to_string(id);
-
-        for (int i = 0; i < skills.columns.size(); i++)
-        {
-            j_elem[skills.columns.at(i).name] = fdb_to_json(r.fields.at(i));
-        }
-
-        std::ofstream skills_elem = make_json_file(item_tables_skills);
-        skills_elem << std::setw(2) << j_elem << std::endl;
-        skills_elem.close();
-
-        ++it;
-    }
-
-    std::cout << "=== PackageComponent ===" << std::endl;
-    const assembly::database::table& pack = schema.at("PackageComponent");
-    std::string path_tables_pack = path_tables + "/PackageComponent";
-
-    it = assembly::database::query::for_table(pack);
-
-    while (it)
-    {
-        const assembly::database::row& r = *it;
-        json j_elem;
-
-        int id = r.fields.at(0).int_val;
-        std::string item_tables_pack = path_tables_pack + "/" + std::to_string(id);
-
-        for (int i = 0; i < pack.columns.size(); i++)
-        {
-            j_elem[pack.columns.at(i).name] = fdb_to_json(r.fields.at(i));
-        }
-
-        std::ofstream pack_elem = make_json_file(item_tables_pack);
-        pack_elem << std::setw(2) << j_elem << std::endl;
-        pack_elem.close();
-
-        ++it;
-    }
-
-    std::cout << "=== ScriptComponent ===" << std::endl;
-    const assembly::database::table& script = schema.at("ScriptComponent");
-    std::string path_tables_script = path_tables + "/ScriptComponent";
-
-    it = assembly::database::query::for_table(script);
-
-    while (it)
-    {
-        const assembly::database::row& r = *it;
-        json j_elem;
-
-        int id = r.fields.at(0).int_val;
-        int page = id / 256;
-
-        std::string item_tables_script = path_tables_script
-            + "/" + std::to_string(page)
-            + "/" + std::to_string(id);
-
-        for (int i = 0; i < script.columns.size(); i++)
-        {
-            j_elem[script.columns.at(i).name] = fdb_to_json(r.fields.at(i));
-        }
-
-        std::ofstream script_elem = make_json_file(item_tables_script);
-        script_elem << std::setw(2) << j_elem << std::endl;
-        script_elem.close();
-
-        ++it;
-    }
+    store_behavior_tables(schema, path_behaviors);
+    store_unpaged_table(schema, path_tables, "SkillBehavior");
 
     // Components
+    store_unpaged_table(schema, path_tables, "PackageComponent");
     store_unpaged_table(schema, path_tables, "PetComponent");
     store_unpaged_table(schema, path_tables, "RocketLaunchpadControlComponent");
     store_unpaged_table(schema, path_tables, "ProximityMonitorComponent");
 
+    store_paged_table(schema, path_tables, "ScriptComponent");
     store_paged_table(schema, path_tables, "DestructibleComponent");
     store_paged_table(schema, path_tables, "VendorComponent");
     store_paged_table(schema, path_tables, "MinifigComponent");
@@ -619,12 +777,12 @@ int fdb_read(int argc, char** argv)
     store_paged_table(schema, path_tables, "ModuleComponent");
     store_paged_table(schema, path_tables, "CollectibleComponent");
 
+    store_unpaged_table(schema, path_tables, "ActivityText");
     store_paged_table(schema, path_tables, "ActivityRewards");
     store_paged_table(schema, path_tables, "Activities");
     store_paged_table(schema, path_tables, "NpcIcons");
 
     // Missions
-
     store_missions_tables(schema);
     store_paged_table(schema, path_tables, "Missions");
     store_paged_table(schema, path_tables, "MissionEmail");
@@ -642,272 +800,21 @@ int fdb_read(int argc, char** argv)
     store_many_table(schema, path_tables, "InventoryComponent", "items");
     store_many_table(schema, path_tables, "MissionNPCComponent", "missions");
 
-    std::cout << "=== LootTable ===" << std::endl;
-    const assembly::database::table& loot_table = schema.at("LootTable");
-    std::string path_tables_loot = path_tables + "/LootTable";
-    std::string path_tables_loot__itemid = path_tables_loot + "/groupBy/itemid";
-    std::string path_tables_loot__index = path_tables_loot + "/groupBy/LootTableIndex";
+    store_loot_tables(schema, path_tables);
 
-    json j_loot_table;
+    store_unpaged_table(schema, path_tables, "Icons");
+    store_paged_table(schema, path_tables, "ItemComponent");
+    store_paged_table(schema, path_tables, "PhysicsComponent");
 
-    for (const assembly::database::slot& slot: loot_table.slots)
+    store_object_tables(schema, path_objects);
+
+    store_paged_table(schema, path_tables, "RenderComponent");
+
+    /*catch (nlohmann::detail::type_error err)
     {
-        json j_elem;
-
-        for (const assembly::database::row& r : slot.rows)
-        {
-            json j_elem_part;
-
-            assembly::database::field id_field = r.fields.at(0);
-            assembly::database::field lti_field = r.fields.at(1);
-
-            int id = id_field.int_val;
-            int lti = lti_field.int_val;
-
-            for (int i = 2; i < loot_table.columns.size(); i++)
-            {
-                j_elem_part[loot_table.columns.at(i).name] = fdb_to_json(r.fields.at(i));
-            }
-
-            json j_item_part(j_elem_part);
-            j_item_part.emplace("LootTableIndex", lti);
-
-            json j_loot_part(j_elem_part);
-            j_loot_part.emplace("itemid", id);
-
-            j_elem[std::to_string(id)]["elements"] += j_item_part;
-            j_loot_table[std::to_string(lti)]["elements"] += j_loot_part;
-        }
-
-        for (json::iterator it = j_elem.begin(); it != j_elem.end(); ++it)
-        {
-            int i = std::stoi(it.key());
-            int page = i / 256;
-            it.value()["itemid"] = i;
-
-            std::string item_tables_loot_table = path_tables_loot__itemid
-                + "/" + std::to_string(page) + "/" + std::to_string(i);
-            std::ofstream loot_table_elem = make_json_file(item_tables_loot_table);
-            loot_table_elem << std::setw(2) << it.value() << std::endl;
-            loot_table_elem.close();
-        }
-    }
-
-    for (json::iterator it = j_loot_table.begin(); it != j_loot_table.end(); ++it)
-    {
-        int i = std::stoi(it.key());
-        int page = i / 256;
-        it.value()["LootTableIndex"] = i;
-
-        std::string item_tables_loot_table = path_tables_loot__index
-            + "/" + std::to_string(page) + "/" + std::to_string(i);
-        std::ofstream loot_table_elem = make_json_file(item_tables_loot_table);
-        loot_table_elem << std::setw(2) << it.value() << std::endl;
-        loot_table_elem.close();
-    }
-
-    j_loot_table.clear();
-
-    std::cout << "=== Icons ===" << std::endl;
-    const assembly::database::table& icons = schema.at("Icons");
-    std::string path_tables_icons = path_tables + "/Icons";
-
-    it = assembly::database::query::for_table(icons);
-
-    while (it)
-    {
-        const assembly::database::row& r = *it;
-        json j_elem;
-
-        int id = r.fields.at(0).int_val;
-        std::string item_tables_icons = path_tables_icons + "/" + std::to_string(id);
-
-        for (int i = 0; i < icons.columns.size(); i++)
-        {
-            j_elem[icons.columns.at(i).name] = fdb_to_json(r.fields.at(i));
-        }
-
-        std::ofstream icons_elem = make_json_file(item_tables_icons);
-        icons_elem << std::setw(2) << j_elem << std::endl;
-        icons_elem.close();
-
-        ++it;
-    }
-
-    std::cout << "=== ItemComponent ===" << std::endl;
-    const assembly::database::table& items = schema.at("ItemComponent");
-    std::string path_tables_items = path_tables + "/ItemComponent";
-
-    it = assembly::database::query::for_table(items);
-
-    while (it)
-    {
-        const assembly::database::row& r = *it;
-        json j_elem;
-
-        int id = r.fields.at(0).int_val;
-        int page = id / 256;
-
-        std::string item_tables_items = path_tables_items
-            + "/" + std::to_string(page) + "/" + std::to_string(id);
-
-        for (int i = 0; i < items.columns.size(); i++)
-        {
-            j_elem[items.columns.at(i).name] = fdb_to_json(r.fields.at(i));
-        }
-
-        std::ofstream items_elem = make_json_file(item_tables_items);
-        items_elem << std::setw(2) << j_elem << std::endl;
-        items_elem.close();
-
-        ++it;
-    }
-
-    std::cout << "=== PhysicsComponent ===" << std::endl;
-    const assembly::database::table& physics = schema.at("PhysicsComponent");
-    std::string path_tables_physics = path_tables + "/PhysicsComponent";
-
-    it = assembly::database::query::for_table(physics);
-
-    while (it)
-    {
-        const assembly::database::row& r = *it;
-        json j_elem;
-
-        int id = r.fields.at(0).int_val;
-        int page = id / 256;
-
-        std::string item_tables_physics = path_tables_physics
-            + "/" + std::to_string(page) + "/" + std::to_string(id);
-
-        for (int i = 0; i < physics.columns.size(); i++)
-        {
-            j_elem[physics.columns.at(i).name] = fdb_to_json(r.fields.at(i));
-        }
-
-        std::ofstream physics_elem = make_json_file(item_tables_physics);
-        physics_elem << std::setw(2) << j_elem << std::endl;
-        physics_elem.close();
-
-        ++it;
-    }
-
-    std::cout << "=== Objects ===" << std::endl;
-    const assembly::database::table& objects = schema.at("Objects"); // 16384
-    const assembly::database::table& components = schema.at("ComponentsRegistry"); // 32768
-    const assembly::database::table& oskill = schema.at("ObjectSkills"); // 4096
-    const assembly::database::table& mIcon = schema.at("mapIcon"); // 4096
-
-    std::string path_objects = "objects";
-
-    it = assembly::database::query::for_table(objects);
-
-    while (it)
-    {
-        json j_object;
-        const assembly::database::row& r = *it;
-
-        int objID = r.fields.at(0).int_val;
-        assembly::database::query::int_eq checkID(objID);
-
-        for (int i = 0; i < objects.columns.size(); i++)
-        {
-            j_object[objects.columns.at(i).name] = fdb_to_json(r.fields.at(i));
-        }
-
-        for (const assembly::database::row& row: components.at(objID).rows)
-        {
-            auto id_field = row.fields.at(0);
-            if (checkID(id_field))
-            {
-                j_object["components"][std::to_string(row.fields.at(1).int_val)] = row.fields.at(2).int_val;
-            }
-        }
-
-        for (const assembly::database::row& row: oskill.at(objID).rows)
-        {
-            auto id_field = row.fields.at(0);
-            if (checkID(id_field))
-            {
-                json j_skill;
-                j_skill["skillID"] = row.fields.at(1).int_val;
-                j_skill["castOnType"] = row.fields.at(2).int_val;
-                j_skill["AICombatWeight"] = row.fields.at(3).int_val;
-                j_object["skills"] += j_skill;
-            }
-        }
-
-        for (const assembly::database::row& row: mIcon.at(objID).rows)
-        {
-            auto id_field = row.fields.at(0);
-            if (checkID(id_field))
-            {
-                json j_icon;
-                j_icon["iconID"] = row.fields.at(1).int_val;
-                j_icon["iconState"] = row.fields.at(2).int_val;
-                j_object["icons"] += j_icon;
-            }
-        }
-
-        int fold_a = objID / 256;
-        int fold_b = fold_a / 256;
-
-        std::string elem_objects = path_objects + "/" +
-            std::to_string(fold_b) + "/" +
-            std::to_string(fold_a) + "/" +
-            std::to_string(objID);
-
-
-        std::ofstream object_file = make_json_file(elem_objects);
-        try
-        {
-            object_file << std::setw(2) << j_object << std::endl;
-        }
-        catch (nlohmann::detail::type_error err)
-        {
-            // TODO: Investigate why some strings are invalid UTF-8
-            //std::cout << objID << std::endl;
-        }
-        object_file.close();
-
-        ++it;
-    }
-
-    std::cout << "=== RenderComponent ===" << std::endl;
-    const assembly::database::table& render = schema.at("RenderComponent");
-    std::string path_tables_render = path_tables + "/RenderComponent";
-
-    it = assembly::database::query::for_table(render);
-
-    while (it)
-    {
-        const assembly::database::row& r = *it;
-        json j_elem;
-
-        int id = r.fields.at(0).int_val;
-        int fold_a = id / 256;
-
-        for (int i = 0; i < render.columns.size(); i++)
-        {
-            j_elem[render.columns.at(i).name] = fdb_to_json(r.fields.at(i));
-        }
-
-        std::string elem_render = path_tables_render + "/" + std::to_string(fold_a) + "/" + std::to_string(id);
-
-        std::ofstream render_file = make_json_file(elem_render);
-        try
-        {
-            render_file << std::setw(2) << j_elem << std::endl;
-        }
-        catch (nlohmann::detail::type_error err)
-        {
-            // TODO: Investigate why some strings are invalid UTF-8
-            //std::cout << objID << std::endl;
-        }
-        render_file.close();
-
-        ++it;
-    }
+        // TODO: Investigate why some strings are invalid UTF-8
+        //std::cout << objID << std::endl;
+    }*/
 
     return 0;
 }
