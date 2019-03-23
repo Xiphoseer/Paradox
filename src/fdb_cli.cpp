@@ -155,8 +155,10 @@ void store_table
     // Change "MinifigDecals_Mouths" to "MinifigDecals/Mouths" on disc
     std::string path_name = replace_all_copy(table_name, "_", "/");
     std::string path_tables_table = path_tables + "/" + path_name;
+    std::string index_tables_table = path_tables_table + "/index";
 
     auto it = assembly::database::query::for_table(table);
+    json j_index;
 
     while (it)
     {
@@ -165,6 +167,11 @@ void store_table
 
         int id = r.fields.at(0).int_val;
         std::string item_tables_table = path_tables_table + pager(id);
+
+        json j_index_elem;
+        j_index_elem["id"] = id;
+        j_index_elem["_links"]["self"]["href"] = "/" + to_json_path(item_tables_table);
+        j_index["_embedded"][table_name] += j_index_elem;
 
         for (int i = 0; i < table.columns.size(); i++)
         {
@@ -177,7 +184,6 @@ void store_table
             std::cerr << "Error '" << err.what() << " while processing PK " << id << ", COL " << i << std::endl;
           }
         }
-
 
         std::ofstream table_elem = make_json_file(item_tables_table);
         try
@@ -193,6 +199,10 @@ void store_table
 
         ++it;
     }
+
+    std::ofstream index_table = make_json_file(index_tables_table);
+    index_table << std::setw(2) << j_index << std::endl;
+    index_table.close();
 }
 
 void store_many_table(
@@ -756,7 +766,11 @@ int fdb_read(int argc, char** argv)
     store_single_table(schema, path_tables, "AccessoryDefaultLoc");
     store_single_table(schema, path_tables, "BrickColors");
     store_single_table(schema, path_tables, "EventGating");
+    store_single_table(schema, path_tables, "FeatureGating");
     store_single_table(schema, path_tables, "Factions");
+    store_single_table(schema, path_tables, "Release_Version");
+    store_single_table(schema, path_tables, "SubscriptionPricing");
+    store_single_table(schema, path_tables, "BrickIDTable");
 
     store_behavior_tables(schema, path_behaviors);
     store_unpaged_table(schema, path_tables, "SkillBehavior");
@@ -809,12 +823,6 @@ int fdb_read(int argc, char** argv)
     store_object_tables(schema, path_objects);
 
     store_paged_table(schema, path_tables, "RenderComponent");
-
-    /*catch (nlohmann::detail::type_error err)
-    {
-        // TODO: Investigate why some strings are invalid UTF-8
-        //std::cout << objID << std::endl;
-    }*/
 
     return 0;
 }
