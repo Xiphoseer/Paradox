@@ -792,7 +792,8 @@ int fdb_read(int argc, char** argv)
     store_paged_table(schema, path_tables, "CollectibleComponent");
 
     store_unpaged_table(schema, path_tables, "ActivityText");
-    store_paged_table(schema, path_tables, "ActivityRewards");
+    store_many_table(schema, path_tables, "ActivityRewards", "activity_rewards");
+    store_many_table(schema, path_tables, "CurrencyTable", "currency_table");
     store_paged_table(schema, path_tables, "Activities");
     store_paged_table(schema, path_tables, "NpcIcons");
 
