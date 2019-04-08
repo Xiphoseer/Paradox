@@ -638,6 +638,7 @@ void store_object_tables(
 
   auto it = assembly::database::query::for_table(objects);
   json j_objects_by_type;
+  json j_objects_by_component;
 
   while (it)
   {
@@ -674,7 +675,11 @@ void store_object_tables(
       auto id_field = row.fields.at(0);
       if (checkID(id_field))
       {
-        j_object["components"][std::to_string(row.fields.at(1).int_val)] = row.fields.at(2).int_val;
+        std::string comp_id = std::to_string(row.fields.at(1).int_val);
+        int32_t component_value = row.fields.at(2).int_val;
+        j_object["components"][comp_id] = component_value;
+        j_object_ref["comp_val"] = component_value;
+        j_objects_by_component[comp_id] += j_object_ref;
       }
     }
 
@@ -727,6 +732,7 @@ void store_object_tables(
     ++it;
   }
 
+  // Export types
   json j_objects_type_index;
   std::string path_objects_by_type = path_objects + "/groupBy/type";
   std::string index_objects_by_type = path_objects_by_type + "/index";
@@ -743,6 +749,24 @@ void store_object_tables(
   std::ofstream type_index_file = make_json_file(index_objects_by_type);
   type_index_file << std::setw(2) << j_objects_type_index << std::endl;
   type_index_file.close();
+
+  // Export components
+  json j_objects_component_index;
+  std::string path_objects_by_component = path_objects + "/groupBy/component";
+  std::string index_objects_by_component = path_objects_by_component + "/index";
+
+  for (json::iterator it = j_objects_by_component.begin(); it != j_objects_by_component.end(); ++it)
+  {
+    j_objects_component_index["components"] += it.key();
+    std::string elem_object_component = path_objects_by_component + "/" + it.key();
+    std::ofstream component_file = make_json_file(elem_object_component);
+    component_file << std::setw(2) << it.value() << std::endl;
+    component_file.close();
+  }
+
+  std::ofstream component_index_file = make_json_file(index_objects_by_component);
+  component_index_file << std::setw(2) << j_objects_component_index << std::endl;
+  component_index_file.close();
 }
 
 int fdb_read(int argc, char** argv)
@@ -765,15 +789,20 @@ int fdb_read(int argc, char** argv)
 
     store_single_table(schema, path_tables, "AccessoryDefaultLoc");
     store_single_table(schema, path_tables, "BrickColors");
+    store_single_table(schema, path_tables, "brickAttributes");
     store_single_table(schema, path_tables, "EventGating");
     store_single_table(schema, path_tables, "FeatureGating");
     store_single_table(schema, path_tables, "Factions");
     store_single_table(schema, path_tables, "Release_Version");
     store_single_table(schema, path_tables, "SubscriptionPricing");
+    store_single_table(schema, path_tables, "LevelProgressionLookup");
     store_single_table(schema, path_tables, "BrickIDTable");
+    store_single_table(schema, path_tables, "mapItemTypes");
 
     store_behavior_tables(schema, path_behaviors);
     store_unpaged_table(schema, path_tables, "SkillBehavior");
+    store_unpaged_table(schema, path_tables, "ItemSets");
+    store_unpaged_table(schema, path_tables, "ItemSetSkills");
 
     // Components
     store_unpaged_table(schema, path_tables, "PackageComponent");
