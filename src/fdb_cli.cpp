@@ -20,11 +20,14 @@
 #include <assembly/cli.hpp>
 #include <assembly/functional.hpp>
 
+#include "fdb_json.hpp"
+
 using namespace nlohmann;
 
 cli::opt_t fdb_options[] =
 {
     { "read",           &fdb_read,          "Reads a fdb file" },
+    { "out",            &fdb_out,           "Generate JSON from an FDB" },
     { "behaviors",      &fdb_behaviors,     "Writes all behavior parameters" },
     //{ "convert",        &fdb_convert,       "Convert an image to another format" },
     { "header",         &fdb_header,        "Generate c++ files for a FDB" },
@@ -69,6 +72,8 @@ void print(int i)
     std::cout << i << std::endl;
 }
 
+const utf::iconv_to_utf8 fromLatin1("ISO-8859-1");
+
 std::ostream& operator<<(std::ostream& ostr, const assembly::database::field& f)
 {
     switch(f.type)
@@ -78,12 +83,10 @@ std::ostream& operator<<(std::ostream& ostr, const assembly::database::field& f)
         case assembly::database::value_type::FLOAT:    ostr << f.flt_val; break;
         case assembly::database::value_type::BIGINT:   ostr << f.i64_val; break;
         case assembly::database::value_type::VARCHAR:
-        case assembly::database::value_type::TEXT: ostr << f.str_val; break;
+        case assembly::database::value_type::TEXT: ostr << fromLatin1(f.str_val); break;
     }
     return ostr;
 }
-
-const utf::iconv_to_utf8 fromLatin1("ISO-8859-1");
 
 const json fdb_to_json(const assembly::database::field& f)
 {
@@ -141,13 +144,21 @@ std::string get_dblpaged_suffix(int id)
     return "/" + std::to_string(page_a) + "/" + std::to_string(page_b) + "/" + std::to_string(id);
 }
 
+json default_indexer(const assembly::database::row& r)
+{
+  json index_entry;
+  index_entry["id"] = fdb_to_json(r.fields.at(0));
+  return index_entry;
+}
+
 /*! \brief Store a database table to disc
  *
  */
 void store_table
 (
     const assembly::database::schema& schema, std::string path_tables,
-    std::string table_name, std::function<std::string(int)> pager
+    std::string table_name, std::function<std::string(int)> pager,
+    std::function<json(const assembly::database::row&)> indexer
 ){
     std::cout << "=== " << table_name << " ===" << std::endl;
     const assembly::database::table& table = schema.at(table_name);
@@ -168,8 +179,7 @@ void store_table
         int id = r.fields.at(0).int_val;
         std::string item_tables_table = path_tables_table + pager(id);
 
-        json j_index_elem;
-        j_index_elem["id"] = id;
+        json j_index_elem = indexer(r);
         j_index_elem["_links"]["self"]["href"] = "/" + to_json_path(item_tables_table);
         j_index["_embedded"][table_name] += j_index_elem;
 
@@ -263,14 +273,38 @@ void store_many_table(
     }
 }
 
-void store_unpaged_table(const assembly::database::schema& schema, std::string path_tables, std::string table_name)
-{
-    store_table(schema, path_tables, table_name, get_unpaged_suffix);
+//! Store an unpaged table with the default indexer
+void store_unpaged_table(
+  const assembly::database::schema& schema,
+  std::string path_tables, std::string table_name
+){
+    store_table(schema, path_tables, table_name, get_unpaged_suffix, default_indexer);
 }
 
-void store_paged_table(const assembly::database::schema& schema, std::string path_tables, std::string table_name)
-{
-    store_table(schema, path_tables, table_name, get_paged_suffix);
+//! Store an unpaged table with a custom indexer
+void store_unpaged_table(
+  const assembly::database::schema& schema,
+  std::string path_tables, std::string table_name,
+  std::function<json(const assembly::database::row&)> indexer
+){
+    store_table(schema, path_tables, table_name, get_unpaged_suffix, indexer);
+}
+
+//! Store a paged table with the default indexer
+void store_paged_table(
+  const assembly::database::schema& schema,
+  std::string path_tables, std::string table_name
+){
+    store_table(schema, path_tables, table_name, get_paged_suffix, default_indexer);
+}
+
+//! Store a paged table with a custom indexer
+void store_paged_table(
+  const assembly::database::schema& schema,
+  std::string path_tables, std::string table_name,
+  std::function<json(const assembly::database::row&)> indexer
+){
+    store_table(schema, path_tables, table_name, get_paged_suffix, indexer);
 }
 
 void store_single_table(const assembly::database::schema& schema, const std::string path_tables, const std::string& table_name)
@@ -769,6 +803,13 @@ void store_object_tables(
   component_index_file.close();
 }
 
+json index_item_set(const assembly::database::row& r) {
+  json index_entry;
+  index_entry["id"] = fdb_to_json(r.fields.at(0));
+  index_entry["rank"] = fdb_to_json(r.fields.at(4));
+  return index_entry;
+}
+
 int fdb_read(int argc, char** argv)
 {
     if (argc <= 1)
@@ -801,8 +842,8 @@ int fdb_read(int argc, char** argv)
 
     store_behavior_tables(schema, path_behaviors);
     store_unpaged_table(schema, path_tables, "SkillBehavior");
-    store_unpaged_table(schema, path_tables, "ItemSets");
-    store_unpaged_table(schema, path_tables, "ItemSetSkills");
+    store_unpaged_table(schema, path_tables, "ItemSets", index_item_set);
+    store_many_table(schema, path_tables, "ItemSetSkills", "set_skills");
 
     // Components
     store_unpaged_table(schema, path_tables, "PackageComponent");
@@ -854,6 +895,43 @@ int fdb_read(int argc, char** argv)
 
     store_paged_table(schema, path_tables, "RenderComponent");
 
+    return 0;
+}
+
+int fdb_out(int argc, char** argv)
+{
+    if (argc <= 1)
+    {
+        std::cout << "Usage: fdb out <file>" << std::endl;
+        return 1;
+    }
+
+    assembly::database::schema schema;
+    assembly::database::io::read_from_file(argv[1], schema);
+
+    paradox::fdb::output_t out(schema);
+
+    auto lot_ref = out.add_ref("LOT", "The object templates");
+    auto gate_ref = out.add_ref("GATE", "The feature gates");
+
+    auto obj = out.add_table("Objects", "Templates for all objects in the game");
+    obj.add_field("id").add_ref(lot_ref);
+    obj.add_field("gate_version").add_ref(gate_ref);
+
+    auto mis = out.add_table("Missions", "Data for all missions / achievements");
+    mis.add_field("offer_objectID").add_ref(lot_ref);
+    mis.add_field("target_objectID").add_ref(lot_ref);
+    mis.add_field("reward_item1").add_ref(lot_ref);
+    mis.add_field("reward_item2").add_ref(lot_ref);
+    mis.add_field("reward_item3").add_ref(lot_ref);
+    mis.add_field("reward_item4").add_ref(lot_ref);
+    mis.add_field("reward_item1_repeatable").add_ref(lot_ref);
+    mis.add_field("reward_item2_repeatable").add_ref(lot_ref);
+    mis.add_field("reward_item3_repeatable").add_ref(lot_ref);
+    mis.add_field("reward_item4_repeatable").add_ref(lot_ref);
+    mis.add_field("gate_version").add_ref(gate_ref);
+
+    out.execute();
     return 0;
 }
 

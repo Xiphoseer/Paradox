@@ -1,4 +1,5 @@
 #pragma once
+#include <assembly/database.hpp>
 #include <assembly/types.hpp>
 #include <nlohmann/json.hpp>
 
@@ -19,4 +20,10 @@ namespace assembly::common
 
     void to_json(nlohmann::json& j, const position& pos);
     void from_json(const nlohmann::json& j, position& pos);
+}
+
+namespace assembly::database
+{
+  void to_json(nlohmann::json& j, const field& f);
+  void from_json(const nlohmann::json& j, field& f);
 }

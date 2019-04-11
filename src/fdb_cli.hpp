@@ -4,6 +4,7 @@ int main_fdb(int argc, char** argv);
 int help_fdb(int argc, char** argv);
 
 int fdb_read(int argc, char** argv);
+int fdb_out(int argc, char** argv);
 int fdb_behaviors(int argc, char** argv);
 
 int fdb_test(int argc, char** argv);
