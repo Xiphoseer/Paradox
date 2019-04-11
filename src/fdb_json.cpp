@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "json.hpp"
+#include "store.hpp"
 
 
 using namespace nlohmann;
@@ -71,11 +72,13 @@ namespace paradox::fdb
     std::cout << "# Output" << std::endl;
     std::cout << std::endl;
     for (auto it = this->tables.begin(); it != this->tables.end(); ++it) {
-      std::cout << "## " << it->first << std::endl;
-      std::cout << "> " << it->second.description << std::endl;
 
-      const table_t& table = it->second.table;
+      const std::string& table_name = it->first;
+      const table_output_t& t_out = it->second;
+      const table_t& table = t_out.table;
 
+      std::cout << "## " << table_name << std::endl;
+      std::cout << "> " << t_out.description << std::endl;
       std::cout << "SLOTS: " << table.slots.size() << std::endl;
       std::cout << std::endl;
 
@@ -83,10 +86,48 @@ namespace paradox::fdb
       while (t_it) {
         auto row = *t_it;
 
+        field_t id_field = row.fields.at(0);
+
         json j_ref_elem;
-        j_ref_elem["id"] = row.fields.at(0);
+        j_ref_elem["id"] = id_field;
+
+        for(auto f_it = t_out.fields.begin(); f_it != t_out.fields.end(); ++f_it) {
+          const std::string& field_name = f_it->first;
+
+          const field_output_t& f_out = f_it->second;
+          const field_t& field = row.fields.at(f_out.index);
+
+          for (auto i_it = f_out.refs.begin(); i_it != f_out.refs.end(); ++i_it) {
+            const index_output_t& i_out = *i_it;
+            const ref_output_t& r_out = i_out.ref;
+            const std::string& ref_name = r_out.name;
+
+            j_refs[ref_name][field.to_string()][table_name][field_name] += j_ref_elem;
+          }
+        }
 
         ++t_it;
+      }
+    }
+
+    paradox::data::store_json_t store;
+    const std::string& path_refs = "refs/";
+    std::cout << "# REFS" << std::endl;
+
+    for (auto jr_it = j_refs.begin(); jr_it != j_refs.end(); ++jr_it) {
+      const std::string& ref_name = jr_it.key();
+      std::cout << "## " << ref_name << std::endl;
+
+      const json& j_ref_data = jr_it.value();
+      const std::string& path_ref = path_refs + ref_name + "/";
+
+      for (auto jd_it = j_ref_data.begin(); jd_it != j_ref_data.end(); ++jd_it) {
+        const std::string key = jd_it.key();
+
+        const json& j_ref_key = jd_it.value();
+        const std::string& path_ref_key = path_ref + key;
+
+        store.save(j_ref_key, path_ref_key);
       }
     }
   }

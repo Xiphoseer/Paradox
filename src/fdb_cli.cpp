@@ -20,6 +20,7 @@
 #include <assembly/cli.hpp>
 #include <assembly/functional.hpp>
 
+#include "store.hpp"
 #include "fdb_json.hpp"
 
 using namespace nlohmann;
@@ -58,21 +59,8 @@ int help_fdb (int argc, char** argv)
     cli::help("DatabaseCLI", fdb_options, "FileDataBase manipulation tool");
 }
 
-void print_state (const std::ios& stream)
-{
-    std::cout << " good()=" << stream.good();
-    std::cout << " eof()=" << stream.eof();
-    std::cout << " fail()=" << stream.fail();
-    std::cout << " bad()=" << stream.bad();
-    std::cout << std::endl;
-}
-
-void print(int i)
-{
-    std::cout << i << std::endl;
-}
-
-const utf::iconv_to_utf8 fromLatin1("ISO-8859-1");
+paradox::data::store json_store = std::make_unique<paradox::data::store_json_t>();
+paradox::data::store xml_store = std::make_unique<paradox::data::store_xml_t>();
 
 std::ostream& operator<<(std::ostream& ostr, const assembly::database::field& f)
 {
@@ -83,7 +71,7 @@ std::ostream& operator<<(std::ostream& ostr, const assembly::database::field& f)
         case assembly::database::value_type::FLOAT:    ostr << f.flt_val; break;
         case assembly::database::value_type::BIGINT:   ostr << f.i64_val; break;
         case assembly::database::value_type::VARCHAR:
-        case assembly::database::value_type::TEXT: ostr << fromLatin1(f.str_val); break;
+        case assembly::database::value_type::TEXT: ostr << utf::from_latin_1(f.str_val); break;
     }
     return ostr;
 }
@@ -97,33 +85,9 @@ const json fdb_to_json(const assembly::database::field& f)
         case assembly::database::value_type::FLOAT:   return json(f.flt_val);
         case assembly::database::value_type::BIGINT:  return json(f.i64_val);
         case assembly::database::value_type::VARCHAR:
-        case assembly::database::value_type::TEXT: return json(fromLatin1(f.str_val));
+        case assembly::database::value_type::TEXT: return json(utf::from_latin_1(f.str_val));
     }
     return json();
-}
-
-std::string to_json_path(const std::string& path)
-{
-    return "lu-json/" + path + ".json";
-}
-
-std::string to_xml_path(const std::string& path)
-{
-    return "lu-xml/" + path + ".xml";
-}
-
-std::ofstream make_json_file(const std::string& path)
-{
-    std::string json_file = to_json_path(path);
-    fs::ensure_dir_exists(json_file);
-    return std::ofstream(json_file);
-}
-
-std::ofstream make_xml_file(const std::string& path)
-{
-    std::string xml_file = to_xml_path(path);
-    fs::ensure_dir_exists(xml_file);
-    return std::ofstream(xml_file);
 }
 
 std::string get_unpaged_suffix(int id)
@@ -180,7 +144,7 @@ void store_table
         std::string item_tables_table = path_tables_table + pager(id);
 
         json j_index_elem = indexer(r);
-        j_index_elem["_links"]["self"]["href"] = "/" + to_json_path(item_tables_table);
+        j_index_elem["_links"]["self"]["href"] = "/" + json_store->to_path(item_tables_table);
         j_index["_embedded"][table_name] += j_index_elem;
 
         for (int i = 0; i < table.columns.size(); i++)
@@ -195,7 +159,7 @@ void store_table
           }
         }
 
-        std::ofstream table_elem = make_json_file(item_tables_table);
+        std::ofstream table_elem = json_store->make_file(item_tables_table);
         try
         {
           table_elem << std::setw(2) << j_elem << std::endl;
@@ -210,7 +174,7 @@ void store_table
         ++it;
     }
 
-    std::ofstream index_table = make_json_file(index_tables_table);
+    std::ofstream index_table = json_store->make_file(index_tables_table);
     index_table << std::setw(2) << j_index << std::endl;
     index_table.close();
 }
@@ -264,7 +228,7 @@ void store_many_table(
 
             std::string item_tables_tbl = path_tables_tbl
                 + "/" + std::to_string(page) + "/" + std::to_string(i);
-            std::ofstream tbl_elem = make_json_file(item_tables_tbl);
+            std::ofstream tbl_elem = json_store->make_file(item_tables_tbl);
             tbl_elem << std::setw(2) << j_elem << std::endl;
             tbl_elem.close();
         }
@@ -316,7 +280,7 @@ void store_single_table(const assembly::database::schema& schema, const std::str
     std::string index_tables_single = path_tables_single + "/index";
 
     json j_single_index;
-    j_single_index["_links"]["self"]["href"] =  "/" + to_json_path(index_tables_single);
+    j_single_index["_links"]["self"]["href"] =  "/" + json_store->to_path(index_tables_single);
     j_single_index["_embedded"][table_name] = json::array();
 
     auto it = assembly::database::query::for_table(single);
@@ -336,7 +300,7 @@ void store_single_table(const assembly::database::schema& schema, const std::str
         ++it;
     }
 
-    std::ofstream single_index = make_json_file(index_tables_single);
+    std::ofstream single_index = json_store->make_file(index_tables_single);
     single_index << std::setw(2) << j_single_index << std::endl;
     single_index.close();
 }
@@ -369,7 +333,7 @@ int store_missions_tables(const assembly::database::schema& schema)
 
   const std::string path_missions = "tables/Missions";
   const std::string index_missions = path_missions + "/groupBy/type";
-  std::ofstream missions = make_json_file(index_missions);
+  std::ofstream missions = json_store->make_file(index_missions);
 
   missions << std::setw(2) << j_missions << std::endl;
   missions.close();
@@ -388,10 +352,10 @@ void store_zone_tables(
   std::string path_tables_zones = path_tables + "/ZoneTable";
   std::string index_tables_zones = path_tables_zones + "/index";
 
-  std::ofstream zone_index = make_json_file(index_tables_zones);
+  std::ofstream zone_index = json_store->make_file(index_tables_zones);
 
   json j_index;
-  j_index["_links"]["self"]["href"] =  "/" + to_json_path(index_tables_zones);
+  j_index["_links"]["self"]["href"] =  "/" + json_store->to_path(index_tables_zones);
   j_index["_embedded"]["ZoneTable"] = json::array();
 
   auto id_sel = tbl.column_sel("zoneID");
@@ -415,10 +379,10 @@ void store_zone_tables(
 
       std::string item_tables_zones = path_tables_zones + "/" + std::to_string(zone_id.int_val);
       std::string item_zones = path_zones + "/" + std::to_string(zone_id.int_val);
-      std::ofstream zone = make_json_file(item_tables_zones);
+      std::ofstream zone = json_store->make_file(item_tables_zones);
 
       json j_zone;
-      j_zone["_links"]["self"]["href"] = "/" + to_json_path(item_tables_zones);
+      j_zone["_links"]["self"]["href"] = "/" + json_store->to_path(item_tables_zones);
 
       for (int i = 0; i < tbl.columns.size(); i++)
       {
@@ -429,8 +393,8 @@ void store_zone_tables(
       zone.close();
 
       json j_index_element;
-      j_index_element["_links"]["self"]["href"] = "/" + to_json_path(item_tables_zones);
-      j_index_element["_links"]["level"]["href"] = "/" + to_json_path(item_zones);
+      j_index_element["_links"]["self"]["href"] = "/" + json_store->to_path(item_tables_zones);
+      j_index_element["_links"]["level"]["href"] = "/" + json_store->to_path(item_zones);
 
       j_index_element["zoneID"] = zone_id.int_val;
       j_index_element["zoneName"] = file.str_val;
@@ -475,8 +439,8 @@ void store_behavior_tables(
   std::string current_page = current_folder + "/index";
 
   json j_behavior_index;
-  j_behavior_index["_links"]["self"]["href"] = "/" + to_json_path(index_behaviors);
-  j_behavior_index["_links"]["first"]["href"] = "/" + to_json_path(current_page);
+  j_behavior_index["_links"]["self"]["href"] = "/" + json_store->to_path(index_behaviors);
+  j_behavior_index["_links"]["first"]["href"] = "/" + json_store->to_path(current_page);
 
   json j_behavior_page;
 
@@ -491,20 +455,20 @@ void store_behavior_tables(
           current_folder = path_behaviors + "/" + std::to_string(new_page_index);
           std::string next_page = current_folder + "/index";
 
-          j_behavior_page["_links"]["next"]["href"] = "/" + to_json_path(next_page);
-          j_behavior_page["_links"]["self"]["href"] = "/" + to_json_path(current_page);
+          j_behavior_page["_links"]["next"]["href"] = "/" + json_store->to_path(next_page);
+          j_behavior_page["_links"]["self"]["href"] = "/" + json_store->to_path(current_page);
 
           json j_index_entry;
-          j_index_entry["_links"]["self"]["href"] = "/" + to_json_path(current_page);
+          j_index_entry["_links"]["self"]["href"] = "/" + json_store->to_path(current_page);
 
           j_behavior_index["_embedded"]["pages"] += j_index_entry;
 
-          std::ofstream page_path = make_json_file(current_page);
+          std::ofstream page_path = json_store->make_file(current_page);
           page_path << std::setw(2) << j_behavior_page << std::endl;
           page_path.close();
 
           j_behavior_page = json();
-          j_behavior_page["_links"]["prev"]["href"] = "/" + to_json_path(current_page);
+          j_behavior_page["_links"]["prev"]["href"] = "/" + json_store->to_path(current_page);
 
           current_page = next_page;
           page_index = new_page_index;
@@ -528,7 +492,7 @@ void store_behavior_tables(
 
           if (checkID(id_field))
           {
-              j_behavior["_links"]["self"]["href"] = "/" + to_json_path(current);
+              j_behavior["_links"]["self"]["href"] = "/" + json_store->to_path(current);
 
               j_behavior["behaviorID"] = fdb_to_json(id_field);
               j_behavior["templateID"] = fdb_to_json(behavior_template_template_id_sel(row));
@@ -561,26 +525,26 @@ void store_behavior_tables(
 
       if (found)
       {
-          std::ofstream behavior_file = make_json_file(current);
+          std::ofstream behavior_file = json_store->make_file(current);
           behavior_file << std::setw(2) << j_behavior << std::endl;
       }
 
       behaviorID++;
   }
 
-  j_behavior_page["_links"]["self"]["href"] = "/" + to_json_path(current_page);
+  j_behavior_page["_links"]["self"]["href"] = "/" + json_store->to_path(current_page);
 
   json j_index_entry;
-  j_index_entry["_links"]["self"]["href"] = "/" + to_json_path(current_page);
+  j_index_entry["_links"]["self"]["href"] = "/" + json_store->to_path(current_page);
 
   j_behavior_index["_embedded"]["pages"] += j_index_entry;
-  j_behavior_index["_links"]["last"]["href"] = "/" + to_json_path(current_page);
+  j_behavior_index["_links"]["last"]["href"] = "/" + json_store->to_path(current_page);
 
-  std::ofstream page_path = make_json_file(current_page);
+  std::ofstream page_path = json_store->make_file(current_page);
   page_path << std::setw(2) << j_behavior_page << std::endl;
   page_path.close();
 
-  std::ofstream index_file = make_json_file(index_behaviors);
+  std::ofstream index_file = json_store->make_file(index_behaviors);
   index_file << std::setw(2) << j_behavior_index << std::endl;
   index_file.close();
 }
@@ -634,7 +598,7 @@ void store_loot_tables(
 
       std::string item_tables_loot_table = path_tables_loot__itemid
         + "/" + std::to_string(page) + "/" + std::to_string(i);
-      std::ofstream loot_table_elem = make_json_file(item_tables_loot_table);
+      std::ofstream loot_table_elem = json_store->make_file(item_tables_loot_table);
       loot_table_elem << std::setw(2) << it.value() << std::endl;
       loot_table_elem.close();
     }
@@ -648,7 +612,7 @@ void store_loot_tables(
 
     std::string item_tables_loot_table = path_tables_loot__index
         + "/" + std::to_string(page) + "/" + std::to_string(i);
-    std::ofstream loot_table_elem = make_json_file(item_tables_loot_table);
+    std::ofstream loot_table_elem = json_store->make_file(item_tables_loot_table);
     loot_table_elem << std::setw(2) << it.value() << std::endl;
     loot_table_elem.close();
   }
@@ -697,8 +661,8 @@ void store_object_tables(
     }
 
     // Store byType
-    std::string type = fromLatin1(objects_type_sel(r).get_str(""));
-    std::string name = fromLatin1(objects_name_sel(r).get_str(""));
+    std::string type = utf::from_latin_1(objects_type_sel(r).get_str(""));
+    std::string name = utf::from_latin_1(objects_name_sel(r).get_str(""));
     json j_object_ref;
     j_object_ref["id"] = objID;
     j_object_ref["name"] = name;
@@ -751,7 +715,7 @@ void store_object_tables(
       std::to_string(objID);
 
 
-    std::ofstream object_file = make_json_file(elem_objects);
+    std::ofstream object_file = json_store->make_file(elem_objects);
     try
     {
       object_file << std::setw(2) << j_object << std::endl;
@@ -775,12 +739,12 @@ void store_object_tables(
   {
     j_objects_type_index["types"] += it.key();
     std::string elem_object_type = path_objects_by_type + "/" + it.key();
-    std::ofstream type_file = make_json_file(elem_object_type);
+    std::ofstream type_file = json_store->make_file(elem_object_type);
     type_file << std::setw(2) << it.value() << std::endl;
     type_file.close();
   }
 
-  std::ofstream type_index_file = make_json_file(index_objects_by_type);
+  std::ofstream type_index_file = json_store->make_file(index_objects_by_type);
   type_index_file << std::setw(2) << j_objects_type_index << std::endl;
   type_index_file.close();
 
@@ -793,12 +757,12 @@ void store_object_tables(
   {
     j_objects_component_index["components"] += it.key();
     std::string elem_object_component = path_objects_by_component + "/" + it.key();
-    std::ofstream component_file = make_json_file(elem_object_component);
+    std::ofstream component_file = json_store->make_file(elem_object_component);
     component_file << std::setw(2) << it.value() << std::endl;
     component_file.close();
   }
 
-  std::ofstream component_index_file = make_json_file(index_objects_by_component);
+  std::ofstream component_index_file = json_store->make_file(index_objects_by_component);
   component_index_file << std::setw(2) << j_objects_component_index << std::endl;
   component_index_file.close();
 }
@@ -914,11 +878,11 @@ int fdb_out(int argc, char** argv)
     auto lot_ref = out.add_ref("LOT", "The object templates");
     auto gate_ref = out.add_ref("GATE", "The feature gates");
 
-    auto obj = out.add_table("Objects", "Templates for all objects in the game");
+    paradox::fdb::table_output_t& obj = out.add_table("Objects", "Templates for all objects in the game");
     obj.add_field("id").add_ref(lot_ref);
     obj.add_field("gate_version").add_ref(gate_ref);
 
-    auto mis = out.add_table("Missions", "Data for all missions / achievements");
+    paradox::fdb::table_output_t& mis = out.add_table("Missions", "Data for all missions / achievements");
     mis.add_field("offer_objectID").add_ref(lot_ref);
     mis.add_field("target_objectID").add_ref(lot_ref);
     mis.add_field("reward_item1").add_ref(lot_ref);

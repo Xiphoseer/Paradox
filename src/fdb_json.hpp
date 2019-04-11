@@ -1,3 +1,5 @@
+#pragma once
+
 #include <assembly/database.hpp>
 #include <nlohmann/json.hpp>
 #include <map>

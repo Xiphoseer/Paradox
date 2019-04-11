@@ -58,9 +58,6 @@ namespace assembly::common
     }
 }
 
-const utf::iconv_to_utf8 fromLatin1("ISO-8859-1");
-const utf::iconv_from_utf8 toLatin1("ISO-8859-1");
-
 namespace assembly::database
 {
   void to_json(nlohmann::json& j, const field& f)
@@ -84,7 +81,7 @@ namespace assembly::database
           break;
         case assembly::database::value_type::VARCHAR:
         case assembly::database::value_type::TEXT:
-          j = fromLatin1(f.str_val);
+          j = utf::from_latin_1(f.str_val);
           break;
     }
   }
@@ -103,7 +100,7 @@ namespace assembly::database
         f.type = assembly::database::value_type::BOOLEAN;
         break;
       case nlohmann::json::value_t::string:
-        f.str_val = toLatin1(j);
+        f.str_val = utf::to_latin_1(j);
         f.type = assembly::database::value_type::VARCHAR;
         break;
       case nlohmann::json::value_t::number_integer:
