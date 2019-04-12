@@ -864,9 +864,9 @@ int fdb_read(int argc, char** argv)
 
 int fdb_out(int argc, char** argv)
 {
-    if (argc <= 1)
+    if (argc <= 2)
     {
-        std::cout << "Usage: fdb out <file>" << std::endl;
+        std::cout << "Usage: fdb out <file> <setup>" << std::endl;
         return 1;
     }
 
@@ -875,27 +875,9 @@ int fdb_out(int argc, char** argv)
 
     paradox::fdb::output_t out(schema);
 
-    auto lot_ref = out.add_ref("LOT", "The object templates");
-    auto gate_ref = out.add_ref("GATE", "The feature gates");
-
-    paradox::fdb::table_output_t& obj = out.add_table("Objects", "Templates for all objects in the game");
-    obj.add_field("id").add_ref(lot_ref);
-    obj.add_field("gate_version").add_ref(gate_ref);
-
-    paradox::fdb::table_output_t& mis = out.add_table("Missions", "Data for all missions / achievements");
-    mis.add_field("offer_objectID").add_ref(lot_ref);
-    mis.add_field("target_objectID").add_ref(lot_ref);
-    mis.add_field("reward_item1").add_ref(lot_ref);
-    mis.add_field("reward_item2").add_ref(lot_ref);
-    mis.add_field("reward_item3").add_ref(lot_ref);
-    mis.add_field("reward_item4").add_ref(lot_ref);
-    mis.add_field("reward_item1_repeatable").add_ref(lot_ref);
-    mis.add_field("reward_item2_repeatable").add_ref(lot_ref);
-    mis.add_field("reward_item3_repeatable").add_ref(lot_ref);
-    mis.add_field("reward_item4_repeatable").add_ref(lot_ref);
-    mis.add_field("gate_version").add_ref(gate_ref);
-
+    out.configure_from_file(argv[2]);
     out.execute();
+
     return 0;
 }
 
