@@ -85,7 +85,7 @@ int32_t pack::SetInstallDir(char* strDirectory)
 {
 	installDir = std::string(strDirectory);
 
-	/* We don't know what this is supposed to return */
+	/* Always returns 0, no matter what happens. */
 	return 0;
 }
 
